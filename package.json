@@ -1,0 +1,32 @@
+{
+  "name": "mcp-docs",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "tsx src/index.ts",
+    "test:st-search": "tsx scripts/test-st-search-docs.ts",
+    "build": "tsc && node -e \"const fs=require('fs'),p=require('path');const d=p.join('build','resources');fs.mkdirSync(d,{recursive:true});fs.copyFileSync(p.join('src','resources','tool-usage-guide.md'),p.join(d,'tool-usage-guide.md'));\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^2.0.0",
+    "axios": "^1.13.6",
+    "better-sqlite3": "^12.6.2",
+    "cheerio": "^1.2.0",
+    "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^5.5.207"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.3.3",
+    "@types/pdf-parse": "^1.1.5",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
