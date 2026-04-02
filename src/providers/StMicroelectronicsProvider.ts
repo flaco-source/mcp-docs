@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { VendorProvider, SearchResult, ReadDocMeta } from './VendorProvider';
 import {
     getDocument,
@@ -11,7 +10,7 @@ import {
     updateDocumentPartIfUnknown,
     findDocumentByUrl,
 } from '../cache/DocumentCache';
-import { HEADERS_HTML, fetchPdfBuffer, extractPdfPages } from './pdfExtract';
+import { fetchPdfBuffer, extractPdfPages } from './pdfExtract';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const cheerio = require('cheerio');
@@ -26,44 +25,83 @@ const ST_DOC_TYPE_LABELS: Record<SearchResult['type'], string> = {
 
 const ST_PRODUCT_PAGE_BASE = 'https://www.st.com/en/microcontrollers-microprocessors';
 
-/** ST often responds better with browser-like context (fewer empty shells / slower bots). */
-const ST_FETCH_HEADERS = {
-    ...HEADERS_HTML,
+function isStSearchDebug(): boolean {
+    const v = process.env.ST_SEARCH_DEBUG;
+    return v === '1' || v === 'true';
+}
+
+const ST_FETCH_HEADERS: Record<string, string> = {
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     Referer: 'https://www.st.com/',
     'Accept-Language': 'en-US,en;q=0.9',
 };
 
-/**
- * Curated stable PDFs when HTML has no extractable links (JS portal). Key = series folder
- * (e.g. stm32g0-series) from `.../microcontrollers-microprocessors/<key>/documentation.html`.
- */
-const ST_SERIES_KNOWN_PDFS: Record<
-    string,
-    Array<{ url: string; title: string; type: SearchResult['type'] }>
-> = {
-    'stm32g0-series': [
-        {
-            title: 'RM0444 — Reference manual STM32G0x1 advanced Arm-based 32-bit MCUs',
-            url: 'https://www.st.com/resource/en/reference_manual/rm0444-stm32g0x1-advanced-armbased-32bit-mcus-stmicroelectronics.pdf',
-            type: 'user_guide',
-        },
-    ],
-};
+const ST_HTML_TIMEOUT_MS = 20_000;
+const ST_SEARCH_API_TIMEOUT_MS = 25_000;
 
-function parsePartNumber(query: string): { basePart: string; exactPart: string; revision: string | null } {
-    const upper = query.trim().toUpperCase().replace(/\s+/g, '');
-    const revMatch = upper.match(/^(.+?)(-R?\d+)$/);
-    if (revMatch) {
-        return { basePart: revMatch[1], exactPart: upper, revision: revMatch[2] };
+// ─── Native fetch helpers (axios blocked by Akamai CDN TLS fingerprinting) ───
+
+async function stFetchText(url: string, timeoutMs: number, extraHeaders?: Record<string, string>): Promise<string | null> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+        const res = await fetch(url, {
+            signal: ctrl.signal,
+            headers: { ...ST_FETCH_HEADERS, ...extraHeaders },
+            redirect: 'follow',
+        });
+        clearTimeout(timer);
+        if (!res.ok) return null;
+        return await res.text();
+    } catch {
+        clearTimeout(timer);
+        return null;
     }
-    return { basePart: upper, exactPart: upper, revision: null };
 }
+
+async function stFetchJson(url: string, timeoutMs: number): Promise<any | null> {
+    const text = await stFetchText(url, timeoutMs, { Accept: 'application/json, text/plain, */*' });
+    if (!text) return null;
+    try { return JSON.parse(text); } catch { return null; }
+}
+
+// ─── ST Search API structured parsing ───
+
+interface StSearchDoc {
+    title_man?: string;
+    doc_id?: string;
+    taxo_class?: string;
+    document_type?: string[];
+    link?: string[];
+    rpn_list?: string[];
+    file_name?: string;
+}
+
+function stTaxoClassToType(taxo: string | undefined): SearchResult['type'] {
+    const t = (taxo ?? '').toLowerCase();
+    if (t.includes('datasheet') || t.includes('data sheet') || t === 'databrief') return 'datasheet';
+    if (t.includes('application note') || t.includes('appnote')) return 'application_note';
+    if (t.includes('reference manual') || t.includes('programming manual') || t.includes('user manual')) return 'user_guide';
+    if (t.includes('errata')) return 'errata';
+    return 'other';
+}
+
+function jcrLinkToCanonicalUrl(jcrPath: string): string | null {
+    const m = jcrPath.match(/\/resource\/technical\/document\/([^/]+)\/.+?\/files\/([^/]+\.pdf)/i);
+    if (!m) return null;
+    const segment = m[1].replace(/_/g, '_');
+    const filename = m[2];
+    return `https://www.st.com/resource/en/${segment}/${filename}`;
+}
+
+// ─── URL helpers ───
 
 function normalizeStUrl(url: string): string {
     return url.trim().split('?')[0];
 }
 
-/** Canonical form for dedupe: https, www.st.com, no query/hash. */
 function normalizeStPdfCanonical(url: string): string {
     try {
         const u = new URL(url.trim());
@@ -79,15 +117,12 @@ function normalizeStPdfCanonical(url: string): string {
     }
 }
 
-/**
- * Map ST /resource/en/<segment>/... path segment to SearchResult type.
- */
 function stResourceSegmentToType(segment: string): SearchResult['type'] {
     const s = segment.toLowerCase();
-    if (s === 'datasheet') return 'datasheet';
+    if (s === 'datasheet' || s === 'data_brief') return 'datasheet';
     if (s === 'application_note') return 'application_note';
     if (s === 'reference_manual' || s === 'programming_manual' || s === 'user_manual') return 'user_guide';
-    if (s === 'errata' || s.includes('errata')) return 'errata';
+    if (s === 'errata' || s === 'errata_sheet' || s.includes('errata')) return 'errata';
     return 'other';
 }
 
@@ -96,91 +131,23 @@ function extractStDocTypeFromUrl(url: string): SearchResult['type'] {
         const u = new URL(url);
         const m = u.pathname.match(/\/resource\/en\/([^/]+)\//i);
         if (m) return stResourceSegmentToType(m[1]);
-    } catch {
-        /* ignore */
-    }
+    } catch { /* ignore */ }
     return 'other';
 }
 
-function titleFromPdfPath(pathname: string): string {
-    const seg = pathname.split('/').filter(Boolean).pop() ?? 'document';
-    return decodeURIComponent(seg.replace(/\.pdf$/i, '')).replace(/[-_]+/g, ' ').trim() || 'PDF document';
+function parsePartNumber(query: string): { basePart: string; exactPart: string; revision: string | null } {
+    const upper = query.trim().toUpperCase().replace(/\s+/g, '');
+    const revMatch = upper.match(/^(.+?)(-R?\d+)$/);
+    if (revMatch) {
+        return { basePart: revMatch[1], exactPart: upper, revision: revMatch[2] };
+    }
+    return { basePart: upper, exactPart: upper, revision: null };
 }
 
 function resolveStHref(href: string): string {
     const h = href.trim();
-    if (h.startsWith('http://') || h.startsWith('https://')) {
-        return h;
-    }
+    if (h.startsWith('http://') || h.startsWith('https://')) return h;
     return new URL(h, 'https://www.st.com/').href;
-}
-
-/** PDFs under ST resource paths (absolute URLs on st.com / content.st.com). */
-const ST_RESOURCE_PDF_RE =
-    /https?:\/\/(?:www\.|content\.)?st\.com\/resource\/en\/[a-z0-9_/+%.-]+\.pdf/gi;
-
-/** Relative resource paths as used inside JSON / HTML attributes. */
-const ST_RESOURCE_PDF_REL_RE = /\/resource\/en\/[a-z0-9_/+%.-]+\.pdf/gi;
-
-/**
- * Second source: family documentation page often has more PDFs in static HTML than the part page.
- * Heuristics for STM32 slugs (ordering code lowercased, e.g. stm32g071rb).
- */
-function deriveStMcuSeriesDocumentationUrl(productSlug: string): string | null {
-    const s = productSlug.toLowerCase();
-    if (s.startsWith('stm32mp')) {
-        const m = s.match(/^stm32(mp[12])/i);
-        if (m) {
-            return `${ST_PRODUCT_PAGE_BASE}/${m[1].toLowerCase()}-series/documentation.html`;
-        }
-        return `${ST_PRODUCT_PAGE_BASE}/stm32mp1-series/documentation.html`;
-    }
-    if (s.startsWith('stm32wb')) {
-        return `${ST_PRODUCT_PAGE_BASE}/stm32wb-series/documentation.html`;
-    }
-    if (s.startsWith('stm32wl')) {
-        return `${ST_PRODUCT_PAGE_BASE}/stm32wl-series/documentation.html`;
-    }
-    const m = s.match(/^stm32([a-z])(\d)/i);
-    if (m) {
-        return `${ST_PRODUCT_PAGE_BASE}/stm32${m[1].toLowerCase()}${m[2]}-series/documentation.html`;
-    }
-    return null;
-}
-
-function seriesDocumentationPathKey(seriesDocUrl: string): string | null {
-    const m = seriesDocUrl.match(
-        /\/microcontrollers-microprocessors\/([^/]+)\/documentation\.html$/i
-    );
-    return m ? m[1].toLowerCase() : null;
-}
-
-/**
- * Add well-known family PDFs if not already discovered from HTML (deduped by URL).
- */
-function injectKnownSeriesPdfs(
-    seriesDocUrl: string | null,
-    partUpper: string,
-    seen: Set<string>,
-    results: SearchResult[]
-): void {
-    if (!seriesDocUrl) return;
-    const key = seriesDocumentationPathKey(seriesDocUrl);
-    if (!key) return;
-    const list = ST_SERIES_KNOWN_PDFS[key];
-    if (!list) return;
-    for (const item of list) {
-        const clean = normalizeStPdfCanonical(item.url);
-        if (seen.has(clean)) continue;
-        seen.add(clean);
-        results.push({
-            title: item.title,
-            description: `${ST_DOC_TYPE_LABELS[item.type]} for ${partUpper}`,
-            url: clean,
-            type: item.type,
-            cached: false,
-        });
-    }
 }
 
 function isStTechnicalPdfUrl(url: string): boolean {
@@ -192,29 +159,13 @@ function isStTechnicalPdfUrl(url: string): boolean {
     return true;
 }
 
-/**
- * ST search API returns PDFs for many products; keep hits relevant to this MCU slug
- * (ordering code lowercased, e.g. stm32g071rb).
- */
-function slugMatchesStPdfPath(productSlug: string, pdfUrl: string): boolean {
-    const path = pdfUrl.toLowerCase();
-    const s = productSlug.toLowerCase();
-    if (path.includes(s)) return true;
-    const m = s.match(/^stm32([a-z])(\d)/i);
-    if (m) {
-        const seriesStem = `stm32${m[1].toLowerCase()}${m[2]}`;
-        if (path.includes(seriesStem)) return true;
-    }
-    if (/^stm32wb/i.test(s) && path.includes('stm32wb')) return true;
-    if (/^stm32wl/i.test(s) && path.includes('stm32wl')) return true;
-    if (/^stm32mp/i.test(s) && path.includes('stm32mp')) return true;
-    // App notes often use dm00… filenames; match first 4 chars after "stm32" (e.g. g071).
-    const tail = s.replace(/^stm32/i, '');
-    if (tail.length >= 4) {
-        const token = tail.slice(0, 4).toLowerCase();
-        if (path.includes(token)) return true;
-    }
-    return !/^stm32/i.test(s);
+const ST_RESOURCE_PDF_RE =
+    /https?:\/\/(?:www\.|content\.)?st\.com\/resource\/en\/[a-z0-9_/+%.-]+\.pdf/gi;
+const ST_RESOURCE_PDF_REL_RE = /\/resource\/en\/[a-z0-9_/+%.-]+\.pdf/gi;
+
+function titleFromPdfPath(pathname: string): string {
+    const seg = pathname.split('/').filter(Boolean).pop() ?? 'document';
+    return decodeURIComponent(seg.replace(/\.pdf$/i, '')).replace(/[-_]+/g, ' ').trim() || 'PDF document';
 }
 
 function pushPdfResult(
@@ -222,29 +173,18 @@ function pushPdfResult(
     partUpper: string,
     linkTitle: string | undefined,
     seen: Set<string>,
-    results: SearchResult[]
+    results: SearchResult[],
+    source?: string,
+    overrideType?: SearchResult['type']
 ): void {
     const cleanUrl = normalizeStPdfCanonical(absUrl);
     if (!isStTechnicalPdfUrl(cleanUrl)) return;
     if (seen.has(cleanUrl)) return;
 
-    let segment = 'other';
-    try {
-        const path = new URL(cleanUrl).pathname;
-        const m = path.match(/\/resource\/en\/([^/]+)\//i);
-        if (m) segment = m[1].toLowerCase();
-    } catch {
-        return;
-    }
-
-    const docType = stResourceSegmentToType(segment);
+    const docType = overrideType ?? extractStDocTypeFromUrl(cleanUrl);
     let rawTitle = (linkTitle ?? '').trim().replace(/\s+/g, ' ');
     if (!rawTitle || rawTitle.toLowerCase() === 'pdf') {
-        try {
-            rawTitle = titleFromPdfPath(new URL(cleanUrl).pathname);
-        } catch {
-            rawTitle = 'Document';
-        }
+        try { rawTitle = titleFromPdfPath(new URL(cleanUrl).pathname); } catch { rawTitle = 'Document'; }
     }
 
     seen.add(cleanUrl);
@@ -255,150 +195,94 @@ function pushPdfResult(
         type: docType,
         cached: false,
     });
-}
-
-/** Extract PDF URLs from any text (HTML or JSON). */
-function extractPdfResultsFromRawText(
-    text: string,
-    partUpper: string,
-    seen: Set<string>,
-    results: SearchResult[]
-): void {
-    ST_RESOURCE_PDF_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = ST_RESOURCE_PDF_RE.exec(text)) !== null) {
-        pushPdfResult(m[0], partUpper, undefined, seen, results);
+    if (isStSearchDebug() && source) {
+        console.error(`DEBUG [ST][${source}] + ${docType} ${cleanUrl}`);
     }
 }
 
-/**
- * Collect PDFs from anchor tags and from raw HTML (JSON-LD / inline scripts often embed URLs).
- */
+// ─── HTML extraction (product page / series page) ───
+
 function extractPdfResultsFromHtml(
     html: string,
     partUpper: string,
     seen: Set<string>,
-    results: SearchResult[]
+    results: SearchResult[],
+    source: string
 ): void {
     const $ = cheerio.load(html);
     $('a[href]').each((_: unknown, el: unknown) => {
         const href: string = $(el).attr('href') ?? '';
         if (!href) return;
         let absUrl: string;
-        try {
-            absUrl = resolveStHref(href);
-        } catch {
-            return;
-        }
+        try { absUrl = resolveStHref(href); } catch { return; }
         const title = $(el).text().trim().replace(/\s+/g, ' ');
-        pushPdfResult(absUrl, partUpper, title, seen, results);
+        pushPdfResult(absUrl, partUpper, title, seen, results, source);
     });
 
-    extractPdfResultsFromRawText(html, partUpper, seen, results);
-}
-
-/** Two parallel fetches; wall time ~= max of both, not sum. */
-const ST_HTML_TIMEOUT_MS = 12_000;
-
-/** Public JSON search used by st.com (see community notes); complements JS-only product UIs. */
-const ST_SEARCH_API_TIMEOUT_MS = 18_000;
-
-async function fetchStSearchResourcesTextForQuery(searchQuery: string): Promise<string> {
-    const q = searchQuery.trim();
-    if (!q) return '';
-    const url = `https://www.st.com/bin/st/search/resources?q=${encodeURIComponent(q)}&limit=80&start=0`;
-    try {
-        const response = await axios.get(url, {
-            headers: {
-                ...ST_FETCH_HEADERS,
-                Accept: 'application/json, text/plain, */*',
-            },
-            timeout: ST_SEARCH_API_TIMEOUT_MS,
-            maxRedirects: 5,
-            validateStatus: (s) => s >= 200 && s < 400,
-        });
-        if (response.data == null) return '';
-        return typeof response.data === 'object'
-            ? JSON.stringify(response.data)
-            : String(response.data);
-    } catch {
-        return '';
+    ST_RESOURCE_PDF_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = ST_RESOURCE_PDF_RE.exec(html)) !== null) {
+        pushPdfResult(m[0], partUpper, undefined, seen, results, source);
     }
 }
 
-const ST_SEARCH_API_UNFILTERED_CAP = 45;
+// ─── Search API (structured JSON via native fetch) ───
 
-/**
- * ST portal JSON search (same backend as st.com search). Prefer PDFs whose path matches
- * the part / STM32 line; if the API returned a large payload but nothing passed the filter,
- * fall back to unfiltered hits (search `q=` is already part-scoped).
- */
 async function extractPdfResultsFromStSearchApi(
     productSlug: string,
     partUpper: string,
     seen: Set<string>,
     results: SearchResult[]
 ): Promise<void> {
-    const queries = [...new Set([partUpper, productSlug].map((s) => s.trim()).filter(Boolean))];
-    const blobs = await Promise.all(queries.map((q) => fetchStSearchResourcesTextForQuery(q)));
-    const combined = blobs.join('\n');
-    if (combined.length === 0) {
-        console.error(
-            'DEBUG [ST]: bin/st/search/resources returned no data (timeout, network, or empty response)'
-        );
+    const url = `https://www.st.com/bin/st/search/resources?q=${encodeURIComponent(partUpper)}&limit=100&start=0`;
+    if (isStSearchDebug()) {
+        console.error(`DEBUG [ST][st_search_api] fetching ${url}`);
     }
 
-    const countBefore = results.length;
-
-    ST_RESOURCE_PDF_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = ST_RESOURCE_PDF_RE.exec(combined)) !== null) {
-        if (!slugMatchesStPdfPath(productSlug, m[0])) continue;
-        pushPdfResult(m[0], partUpper, undefined, seen, results);
+    const data = await stFetchJson(url, ST_SEARCH_API_TIMEOUT_MS);
+    if (!data) {
+        console.error('DEBUG [ST]: search API returned no data (timeout or network error)');
+        return;
     }
 
-    ST_RESOURCE_PDF_REL_RE.lastIndex = 0;
-    while ((m = ST_RESOURCE_PDF_REL_RE.exec(combined)) !== null) {
-        const abs = normalizeStPdfCanonical(`https://www.st.com${m[0]}`);
-        if (!slugMatchesStPdfPath(productSlug, abs)) continue;
-        pushPdfResult(abs, partUpper, undefined, seen, results);
+    const docs: StSearchDoc[] = data?.response?.docs ?? [];
+    if (isStSearchDebug()) {
+        console.error(`DEBUG [ST][st_search_api] numFound=${data?.response?.numFound ?? '?'} docs=${docs.length}`);
     }
 
-    const filteredAdded = results.length - countBefore;
-    if (filteredAdded === 0 && combined.length > 200) {
-        let unfiltered = 0;
-        ST_RESOURCE_PDF_RE.lastIndex = 0;
-        while ((m = ST_RESOURCE_PDF_RE.exec(combined)) !== null && unfiltered < ST_SEARCH_API_UNFILTERED_CAP) {
-            const before = results.length;
-            pushPdfResult(m[0], partUpper, undefined, seen, results);
-            if (results.length > before) unfiltered += 1;
-        }
-        ST_RESOURCE_PDF_REL_RE.lastIndex = 0;
-        while ((m = ST_RESOURCE_PDF_REL_RE.exec(combined)) !== null && unfiltered < ST_SEARCH_API_UNFILTERED_CAP) {
-            const abs = normalizeStPdfCanonical(`https://www.st.com${m[0]}`);
-            const before = results.length;
-            pushPdfResult(abs, partUpper, undefined, seen, results);
-            if (results.length > before) unfiltered += 1;
+    for (const doc of docs) {
+        const jcrLinks = doc.link ?? [];
+        const docType = stTaxoClassToType(doc.taxo_class);
+        const title = doc.title_man ?? doc.doc_id ?? 'Document';
+        const docIdPrefix = doc.doc_id ?? '';
+
+        for (const jcrPath of jcrLinks) {
+            const canonical = jcrLinkToCanonicalUrl(jcrPath);
+            if (canonical) {
+                pushPdfResult(canonical, partUpper, `${docIdPrefix} ${title}`.trim(), seen, results, 'st_search_api', docType);
+            }
         }
     }
 }
 
-async function fetchStHtml(url: string): Promise<string | null> {
-    try {
-        const response = await axios.get(url, {
-            headers: ST_FETCH_HEADERS,
-            timeout: ST_HTML_TIMEOUT_MS,
-            maxRedirects: 5,
-            validateStatus: (s) => s >= 200 && s < 500,
-        });
-        if (response.status !== 200 || response.data == null) return null;
-        return String(response.data);
-    } catch {
-        return null;
+// ─── Series heuristics ───
+
+function deriveStMcuSeriesDocumentationUrl(productSlug: string): string | null {
+    const s = productSlug.toLowerCase();
+    if (s.startsWith('stm32mp')) {
+        const m = s.match(/^stm32(mp[12])/i);
+        if (m) return `${ST_PRODUCT_PAGE_BASE}/${m[1].toLowerCase()}-series/documentation.html`;
+        return `${ST_PRODUCT_PAGE_BASE}/stm32mp1-series/documentation.html`;
     }
+    if (s.startsWith('stm32wb')) return `${ST_PRODUCT_PAGE_BASE}/stm32wb-series/documentation.html`;
+    if (s.startsWith('stm32wl')) return `${ST_PRODUCT_PAGE_BASE}/stm32wl-series/documentation.html`;
+    const m = s.match(/^stm32([a-z])(\d)/i);
+    if (m) return `${ST_PRODUCT_PAGE_BASE}/stm32${m[1].toLowerCase()}${m[2]}-series/documentation.html`;
+    return null;
 }
 
-/** True if this PDF URL is already stored for vendor ST (metadata from a prior search or read). */
+// ─── Main provider ───
+
 function isStDocInDb(url: string): boolean {
     const canon = normalizeStPdfCanonical(url);
     const meta = findDocumentByUrl(canon);
@@ -412,7 +296,7 @@ export class StMicroelectronicsProvider extends VendorProvider {
     async searchDocs(query: string): Promise<SearchResult[]> {
         const { basePart, exactPart, revision } = parsePartNumber(query);
         const slug = exactPart.toLowerCase();
-        console.error(`DEBUG [ST]: Searching for part: ${exactPart} (slug ${slug}) — scrape + DB merge`);
+        console.error(`DEBUG [ST]: Searching for part: ${exactPart} (slug ${slug}) — fetch + search API + DB merge`);
 
         const scraped = await this.scrapeProductPage(slug, exactPart);
 
@@ -438,16 +322,22 @@ export class StMicroelectronicsProvider extends VendorProvider {
         }
 
         const merged: SearchResult[] = [
-            ...scraped.map((r) => {
-                const url = normalizeStPdfCanonical(r.url);
-                return {
-                    ...r,
-                    url,
-                    cached: isStDocInDb(url),
-                };
-            }),
+            ...scraped.map((r) => ({
+                ...r,
+                url: normalizeStPdfCanonical(r.url),
+                cached: isStDocInDb(r.url),
+            })),
             ...fromDb,
         ];
+
+        if (isStSearchDebug()) {
+            console.error(
+                `DEBUG [ST]: searchDocs merge: scraped=${scraped.length} extra_from_db=${fromDb.length} merged=${merged.length}`
+            );
+            for (const r of merged) {
+                console.error(`DEBUG [ST]:   out: type=${r.type} cached=${r.cached} title=${JSON.stringify(r.title)} url=${r.url}`);
+            }
+        }
 
         const savedPart = exactPart;
         for (const r of merged) {
@@ -464,22 +354,29 @@ export class StMicroelectronicsProvider extends VendorProvider {
         const productUrl = `${ST_PRODUCT_PAGE_BASE}/${slug}.html`;
         const seriesDocUrl = deriveStMcuSeriesDocumentationUrl(slug);
 
+        if (isStSearchDebug()) {
+            console.error(`DEBUG [ST]: scrapeProductPage urls: product=${productUrl} series=${seriesDocUrl ?? '(none)'}`);
+        }
+
         await Promise.all([
             (async () => {
-                const html = await fetchStHtml(productUrl);
-                if (html) extractPdfResultsFromHtml(html, partUpper, seen, results);
+                const html = await stFetchText(productUrl, ST_HTML_TIMEOUT_MS);
+                if (html) extractPdfResultsFromHtml(html, partUpper, seen, results, 'product_page');
             })(),
             (async () => {
                 if (!seriesDocUrl) return;
-                const html = await fetchStHtml(seriesDocUrl);
-                if (html) extractPdfResultsFromHtml(html, partUpper, seen, results);
+                const html = await stFetchText(seriesDocUrl, ST_HTML_TIMEOUT_MS);
+                if (html) extractPdfResultsFromHtml(html, partUpper, seen, results, 'series_documentation');
             })(),
             extractPdfResultsFromStSearchApi(slug, partUpper, seen, results),
         ]);
 
-        injectKnownSeriesPdfs(seriesDocUrl, partUpper, seen, results);
-
-        return this.withDatasheetFallback(slug, partUpper, results);
+        const afterScrape = results.length;
+        const withFb = this.withDatasheetFallback(slug, partUpper, results);
+        if (isStSearchDebug()) {
+            console.error(`DEBUG [ST]: scrape phase summary: before_fallback=${afterScrape} after=${withFb.length}`);
+        }
+        return withFb;
     }
 
     private withDatasheetFallback(
@@ -493,6 +390,9 @@ export class StMicroelectronicsProvider extends VendorProvider {
         const fallbackUrl = normalizeStPdfCanonical(
             `https://www.st.com/resource/en/datasheet/${slug}.pdf`
         );
+        if (isStSearchDebug()) {
+            console.error(`DEBUG [ST][datasheet_fallback] + ${fallbackUrl}`);
+        }
         return [
             ...results,
             {
