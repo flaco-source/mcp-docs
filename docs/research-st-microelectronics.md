@@ -193,7 +193,7 @@ Heurística sugerida para STM32:
 - [ ] Listar enlaces PDF encontrados vs lista manual en el navegador (pestaña Documentation).
 - [ ] Si falta RM en HTML, localizar API XHR o usar URL de familia `.../stm32g0-series/documentation.html`.
 - [x] Implementar `StMicroelectronicsProvider` y registrar en `index.ts`.
-- [ ] Tests manuales completos: `read_electronics_doc` con datasheet y RM; `query_doc_content`; `read_electronics_doc_page` (v0: `readDoc`/`queryContent` listos; `lookupDoc` / `getDocumentPageText` siguen sin override para ST).
+- [ ] Tests manuales completos: `read_doc` con datasheet y RM; `query_doc_content`; `read_doc_page` (v0: `readDoc`/`queryContent` listos; `lookupDoc` / `getDocumentPageText` siguen sin override para ST).
 - [ ] Actualizar guía MCP (`tool-usage-guide.md`) con `vendor: 'ST'` y particularidades.
 
 ---
@@ -222,7 +222,7 @@ Heurística sugerida para STM32:
 
 - Solo categoría de producto **MCU** en la URL base (`…/microcontrollers-microprocessors/<slug>.html`); otros productos ST pueden requerir otra plantilla.
 - La pestaña **Documentation** puede cargar PDFs vía **JavaScript**; la lista obtenida puede ser un subconjunto de la visible en el navegador.
-- `lookup_electronics_doc` y `read_electronics_doc_page` **no** están implementados para ST en v0 (heredan el default que indica no soportado / mismatch).
+- `lookup_doc` y `read_doc_page` **no** están implementados para ST en v0 (heredan el default que indica no soportado / mismatch).
 
 **Siguiente paso sugerido:** si aún faltan PDFs respecto al navegador, inspeccionar en DevTools las llamadas XHR/fetch del portal ST y valorar un cliente a esa API (estabilidad y ToS).
 

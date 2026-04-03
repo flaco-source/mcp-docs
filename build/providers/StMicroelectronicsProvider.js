@@ -437,7 +437,7 @@ class StMicroelectronicsProvider extends VendorProvider_1.VendorProvider {
         const filtered = stExcludeNoiseFromLookupCandidates(docs);
         const suggestedDocuments = (0, lookupRanking_1.capSuggestedDocuments)((0, lookupRanking_1.sortSearchResultsForLookup)(question, filtered));
         steps.push('suggested_documents_only');
-        steps.push('next_step_read_electronics_doc');
+        steps.push('next_step_read_doc');
         return { chunks: [], steps, suggestedDocuments };
     }
     async getDocumentPageText(docUrl, page, options) {
@@ -448,7 +448,7 @@ class StMicroelectronicsProvider extends VendorProvider_1.VendorProvider {
         }
         const meta = (0, DocumentCache_1.findDocumentByUrl)(docUrl) ?? (0, DocumentCache_1.findDocumentByUrl)(normalizeStPdfCanonical(docUrl));
         if (!meta) {
-            throw new Error(`No document in the index for this URL. Index it first with read_electronics_doc. URL: ${docUrl}`);
+            throw new Error(`No document in the index for this URL. Index it first with read_doc. URL: ${docUrl}`);
         }
         if (meta.vendor !== this.vendorId) {
             throw new Error(`Document vendor mismatch: expected ${this.vendorId}`);

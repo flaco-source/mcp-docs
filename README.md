@@ -7,14 +7,14 @@ An MCP (Model Context Protocol) server that gives LLMs direct access to **offici
 
 | Tool                            | Role                                                                                                                            |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `**lookup_electronics_doc`**    | Part + question: **FTS on the local index only**; if no match, returns **`suggestedDocuments`** (links from the vendor site). Does **not** download PDFs — use **`read_electronics_doc`** next. |
-| `search_electronics_docs`       | List PDF links for a part (metadata only).                                                                                      |
-| `**read_electronics_doc`**      | Index a PDF by **direct URL** — use for `/lit/ds/symlink/....pdf` and any link the user already has. Optional `part` / `title`. |
+| `**lookup_doc`**    | Part + question: **FTS on the local index only**; if no match, returns **`suggestedDocuments`** (links from the vendor site). Does **not** download PDFs — use **`read_doc`** next. |
+| `search_docs`       | List PDF links for a part (metadata only).                                                                                      |
+| `**read_doc`**      | Index a PDF by **direct URL** — use for `/lit/ds/symlink/....pdf` and any link the user already has. Optional `part` / `title`. |
 | `query_doc_content`             | BM25 search; each hit includes `**docUrl`** and `**pageNum**`.                                                                  |
-| `**read_electronics_doc_page**` | Full indexed text for **page** or **page range** (`docUrl` from search results).                                                |
+| `**read_doc_page**` | Full indexed text for **page** or **page range** (`docUrl` from search results).                                                |
 
 
-**When to use:** `lookup` for index check + suggested URLs; `**read_electronics_doc`** to index; `**read_electronics_doc_page**` after `query_doc_content` when you need full page text. TI symlink datasheets often need **`read_electronics_doc`** directly. See `[src/resources/tool-usage-guide.md](src/resources/tool-usage-guide.md)`.
+**When to use:** `lookup` for index check + suggested URLs; `**read_doc`** to index; `**read_doc_page**` after `query_doc_content` when you need full page text. TI symlink datasheets often need **`read_doc`** directly. See `[src/resources/tool-usage-guide.md](src/resources/tool-usage-guide.md)`.
 
 ## MCP resources
 
@@ -43,18 +43,42 @@ Project skills: [`electronics-docs-mcp`](.cursor/skills/electronics-docs-mcp/SKI
 
 1. Create `src/providers/YourVendorProvider.ts` extending `VendorProvider`.
 2. Implement `searchDocs`, `readDoc`, `queryContent`, and optionally override `**lookupDoc**` and `**getDocumentPageText**` for orchestrated behavior and page reads.
-3. Register the provider in `[src/index.ts](src/index.ts)` under `vendors`.
+3. Register the provider in `[src/mcpServerFactory.ts](src/mcpServerFactory.ts)` under `vendors`.
 4. Rebuild: `npm run build`
 
 ## Development
 
 ```bash
 npm install
-npm run build   # compiles TS and copies src/resources/*.md to build/resources/
-npm start       # stdio MCP server
+npm run build   # compiles TS → build/ and copies src/resources/*.md to build/resources/
+npm start       # stdio MCP server (for Cursor / Claude Desktop)
+npm run start:http  # HTTP MCP server on port 3000 (for network / remote use)
 ```
 
-### Cursor MCP config
+## Transport modes
+
+This server supports **two transports** that share identical tools and resources:
+
+| Mode       | Entry point          | Transport                     | Use case                            |
+| ---------- | -------------------- | ----------------------------- | ----------------------------------- |
+| **stdio**  | `src/index.ts`       | `StdioServerTransport`        | Cursor, Claude Desktop (local)      |
+| **HTTP**   | `src/server-http.ts` | `StreamableHTTPServerTransport` (stateless) | LAN testing, remote deployment, multi-client |
+
+The shared logic lives in `src/mcpServerFactory.ts` — both entry points call `createMcpServer()`.
+
+---
+
+## stdio mode (local — Cursor / Claude Desktop)
+
+### How "local" works
+
+This server speaks **MCP over stdio**, not HTTP. The IDE spawns `node …/build/index.js` (or Docker with `-i`) and talks to the process over pipes. There is nothing to "open in the browser"; **exposure = registering the command in Cursor / Claude** so they start the binary for each session.
+
+The SQLite index lives at **`~/.electronics-docs-mcp/docs.db`** on the host (or `/root/.electronics-docs-mcp/` inside Linux containers unless you mount a volume).
+
+### Cursor MCP config (Node — recommended)
+
+Use an **absolute path** to `build/index.js`. Adjust the drive/path for your machine.
 
 ```json
 {
@@ -67,45 +91,278 @@ npm start       # stdio MCP server
 }
 ```
 
-### Claude Desktop
+After editing MCP settings, **reload the window** or restart the MCP server so it picks up rebuilds.
 
-Same `command` / `args` in `claude_desktop_config.json` (e.g. `%APPDATA%\Claude`).
+### Cursor MCP config (Docker)
 
-## Docker
+Build the image first (`npm run build` is required so `build/` exists before `docker build`).
 
 ```bash
 npm run build
 docker build -t electronics-docs-mcp .
-docker run electronics-docs-mcp
 ```
 
-The image expects `build/` to include `resources/` (run `npm run build` before `docker build`).
+Cursor runs the container with **`-i`** so stdin stays open for the stdio protocol. Persist the index on a named volume (maps to `/root/.electronics-docs-mcp` in the image):
 
-## Testing
+```json
+{
+  "mcpServers": {
+    "electronics-docs": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "electronics-docs-mcp-data:/root/.electronics-docs-mcp",
+        "electronics-docs-mcp"
+      ]
+    }
+  }
+}
+```
+
+On first run Docker creates the volume `electronics-docs-mcp-data`. To reset the index: remove the volume (`docker volume rm electronics-docs-mcp-data`) or delete `docs.db` inside it.
+
+### Claude Desktop
+
+Same `command` / `args` as Cursor in `claude_desktop_config.json` (e.g. `%APPDATA%\Claude` on Windows).
+
+---
+
+## HTTP mode (LAN / remote)
+
+The HTTP server exposes the same MCP tools and resources over **MCP Streamable HTTP** (POST `/mcp`).  
+Each request is fully independent — no session state is kept in memory.
+
+### Quick start
 
 ```bash
-npm test
-# build + `run.ts all` without inheriting AGENT_E2E_READ from the shell (see run-default-smoke.cjs)
+# Development (tsx, auto-reload)
+npm run start:http
+
+# Production (compiled)
+npm run build
+npm run start:http:prod
 ```
 
-[`scripts/agent-flow/run.ts`](scripts/agent-flow/run.ts) covers resource, search, lookup (TI + ST), and optionally read/query/page/flow. By default **`AGENT_E2E_READ` is unset**, so PDF downloads are skipped. Set `AGENT_E2E_READ=1` for full read/query/page (network required).
+Default: `http://0.0.0.0:3000/mcp`
+
+### Environment variables
+
+| Variable         | Default     | Description                                       |
+| ---------------- | ----------- | ------------------------------------------------- |
+| `PORT`           | `3000`      | TCP port to listen on                             |
+| `HOST`           | `0.0.0.0`   | Interface to bind (`127.0.0.1` for local-only)    |
+| `MCP_AUTH_TOKEN` | _(unset)_   | When set, all requests must carry `Authorization: Bearer <token>` |
+
+### Health check
 
 ```bash
-npx tsx scripts/agent-flow/run.ts --tool search --vendor ST
+curl http://localhost:3000/health
+# {"status":"ok","server":"electronics-docs-mcp","version":"2.5.0"}
 ```
+
+### Test a tool call (curl)
+
+```bash
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list"
+  }'
+```
+
+With auth token:
+
+```bash
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mysecret" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+### Cursor `mcp.json` (remote Streamable HTTP)
+
+Cursor reads MCP settings from a JSON file at the **user** level (not per-project):
+
+| OS | Path |
+| --- | --- |
+| **Windows** | `%USERPROFILE%\.cursor\mcp.json` — e.g. `C:\Users\YourName\.cursor\mcp.json` |
+| **macOS / Linux** | `~/.cursor/mcp.json` |
+
+Merge the block below into the top-level `"mcpServers"` object (alongside any other servers you already use).
+
+**Required fields for this server**
+
+| Field | Value |
+| ----- | ----- |
+| `type` | `"streamableHttp"` — tells Cursor to use the Streamable HTTP MCP client (POST to `/mcp`). Without it, the client may POST to `/` and you get **`Cannot POST /`**. |
+| `url` | Full URL ending in **`/mcp`** — e.g. `http://192.168.1.100:3000/mcp` or `https://your-subdomain.trycloudflare.com/mcp`. Do **not** use only the origin (`https://host/`) or Cursor will target `/` instead of `/mcp`. |
+| `headers` (optional) | Only if the server was started with **`MCP_AUTH_TOKEN`**. Use **`Authorization": "Bearer YOUR_TOKEN"`** — the word **`Bearer`** plus a space before the secret is required; the server compares the token after `Bearer ` to `MCP_AUTH_TOKEN`. |
+
+**Example — LAN (no auth on server)**
+
+```json
+{
+  "mcpServers": {
+    "electronics-docs-remote": {
+      "type": "streamableHttp",
+      "url": "http://192.168.1.100:3000/mcp"
+    }
+  }
+}
+```
+
+**Example — LAN or tunnel with `MCP_AUTH_TOKEN`**
+
+```json
+{
+  "mcpServers": {
+    "electronics-docs-remote": {
+      "type": "streamableHttp",
+      "url": "http://192.168.1.100:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_SECRET_TOKEN"
+      }
+    }
+  }
+}
+```
+
+**Example — Cloudflare quick tunnel** (`cloudflared tunnel --url http://localhost:3000`)
+
+The printed URL must include **`/mcp`**. Quick tunnels get a **new** `*.trycloudflare.com` hostname each run — update `url` whenever you restart `cloudflared` without a named tunnel.
+
+```json
+{
+  "mcpServers": {
+    "electronics-docs-remote": {
+      "type": "streamableHttp",
+      "url": "https://random-name.trycloudflare.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_SECRET_TOKEN"
+      }
+    }
+  }
+}
+```
+
+After editing `mcp.json`, **reload the Cursor window** (or restart MCP) so the config is picked up.
+
+**Claude Desktop** uses its own file (e.g. `claude_desktop_config.json` on Windows under `%APPDATA%\Claude\`) — same `url` / `headers` ideas apply if the client supports HTTP MCP.
+
+---
+
+## Exposing to the internet
+
+### Option A — ngrok (fastest, for short-term testing)
+
+```bash
+npm install -g ngrok
+ngrok http 3000
+# → https://abc123.ngrok.io  (public HTTPS tunnel to localhost:3000)
+```
+
+Set in Cursor (`~/.cursor/mcp.json` or `%USERPROFILE%\.cursor\mcp.json` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "electronics-docs-remote": {
+      "type": "streamableHttp",
+      "url": "https://abc123.ngrok.io/mcp",
+      "headers": { "Authorization": "Bearer mysecret" }
+    }
+  }
+}
+```
+
+### Option B — Cloudflare Tunnel (free, stable, no open port)
+
+```bash
+# Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
+cloudflared tunnel --url http://localhost:3000
+# → https://some-name.trycloudflare.com
+```
+
+### Option C — Docker + VPS / cloud (permanent deployment)
+
+Build a production image that starts the HTTP server:
+
+```dockerfile
+# Add to Dockerfile (replace the existing CMD)
+CMD ["node", "build/server-http.js"]
+```
+
+Deploy on any Node-capable platform:
+
+```bash
+# Railway / Fly.io / Render — set env vars in dashboard:
+#   PORT=3000  (usually auto-set by platform)
+#   MCP_AUTH_TOKEN=<your-secret>
+
+# Fly.io example
+fly launch --name electronics-docs-mcp
+fly secrets set MCP_AUTH_TOKEN=mysecret
+fly deploy
+```
+
+### Option D — Docker Compose (self-hosted server)
+
+```yaml
+# docker-compose.yml
+services:
+  mcp-http:
+    build: .
+    command: node build/server-http.js
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - MCP_AUTH_TOKEN=mysecret
+    volumes:
+      - mcp-data:/root/.electronics-docs-mcp
+    restart: unless-stopped
+
+volumes:
+  mcp-data:
+```
+
+```bash
+npm run build
+docker compose up -d
+```
+
+---
 
 ## Project structure
 
 ```
 src/
-├── index.ts                    # MCP server: tools + resources
+├── index.ts                    # stdio entry point  (Cursor / Claude Desktop)
+├── server-http.ts              # HTTP entry point   (LAN / remote / cloud)
+├── mcpServerFactory.ts         # shared MCP server logic (tools + resources)
 ├── resources/
 │   └── tool-usage-guide.md    # Copied to build/resources/ on build
 ├── cache/
 │   └── DocumentCache.ts        # SQLite + FTS5
 └── providers/
     ├── VendorProvider.ts
-    └── TexasInstrumentsProvider.ts
+    ├── TexasInstrumentsProvider.ts
+    └── StMicroelectronicsProvider.ts
 ```
 
-Indexed data is stored under `**~/.electronics-docs-mcp/docs.db**`.
+Indexed data is stored under **`~/.electronics-docs-mcp/docs.db`**.
+
+## Testing
+
+```bash
+npm test
+# build + run.ts all (see run-default-smoke.cjs)
+```
+
+[`scripts/agent-flow/run.ts`](scripts/agent-flow/run.ts) covers resource, search, lookup (TI + ST), and optionally read/query/page/flow. By default **`RUN_E2E_NETWORK` is `false`** in that script, so PDF downloads are skipped. Set **`RUN_E2E_NETWORK = true`** in `run.ts` for full read/query/page (network required).
+
+```bash
+npx tsx scripts/agent-flow/run.ts --tool search --vendor ST
+```

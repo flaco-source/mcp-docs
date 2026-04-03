@@ -11,7 +11,7 @@ import type { ReadDocMeta } from "../../src/providers/VendorProvider.ts";
 import { fixtures, type VendorKey } from "./fixtures.ts";
 
 /** When false, `read` / `query` / `page` and the network phase of `flow` / `all` are skipped (no PDF download). */
-const RUN_E2E_NETWORK = true;
+const RUN_E2E_NETWORK = false;
 
 const TOOL_NAMES = new Set([
     "resource",

@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.LOOKUP_SUGGESTED_MAX = void 0;
 exports.sortSearchResultsForLookup = sortSearchResultsForLookup;
 exports.capSuggestedDocuments = capSuggestedDocuments;
-/** Max PDFs to return in lookup_electronics_doc suggestedDocuments (metadata only; no download). */
+/** Max PDFs to return in lookup_doc suggestedDocuments (metadata only; no download). */
 exports.LOOKUP_SUGGESTED_MAX = 25;
 /**
  * Order search hits for lookup suggestions: TRM-first for register-style questions, else datasheet-first.
