@@ -21,8 +21,11 @@ const os_1 = __importDefault(require("os"));
 const fs_1 = __importDefault(require("fs"));
 const CHUNK_SIZE = 1800; // chars per chunk (~450 tokens)
 const CHUNK_OVERLAP = 200; // overlap between chunks
-// Store the DB in a user-level data directory so it persists across runs
-const DB_DIR = path_1.default.join(os_1.default.homedir(), '.electronics-docs-mcp');
+// Store the DB in a user-level data directory so it persists across runs.
+// On Vercel/serverless, set ELECTRONICS_DOCS_DB_DIR to a writable path (e.g. /tmp/electronics-docs-mcp).
+const DB_DIR = process.env.ELECTRONICS_DOCS_DB_DIR
+    ? path_1.default.resolve(process.env.ELECTRONICS_DOCS_DB_DIR)
+    : path_1.default.join(os_1.default.homedir(), '.electronics-docs-mcp');
 const DB_PATH = path_1.default.join(DB_DIR, 'docs.db');
 function getDb() {
     fs_1.default.mkdirSync(DB_DIR, { recursive: true });

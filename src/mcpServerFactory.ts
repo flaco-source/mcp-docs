@@ -26,12 +26,21 @@ const vendors: Record<string, VendorProvider> = {
 };
 
 function loadToolUsageGuide(): string {
-    const guidePath = path.join(__dirname, "resources", "tool-usage-guide.md");
-    try {
-        return fs.readFileSync(guidePath, "utf-8");
-    } catch {
-        return `# Tool usage guide\n\nGuide file not found at ${guidePath}. Rebuild the project so build/resources/tool-usage-guide.md exists.`;
+    const candidates = [
+        path.join(__dirname, "resources", "tool-usage-guide.md"),
+        path.join(process.cwd(), "build", "resources", "tool-usage-guide.md"),
+        path.join(process.cwd(), "src", "resources", "tool-usage-guide.md"),
+    ];
+    for (const guidePath of candidates) {
+        try {
+            if (fs.existsSync(guidePath)) {
+                return fs.readFileSync(guidePath, "utf-8");
+            }
+        } catch {
+            /* try next */
+        }
     }
+    return `# Tool usage guide\n\nGuide file not found. Rebuild so build/resources/tool-usage-guide.md exists, or set cwd to project root on serverless.`;
 }
 
 /**
