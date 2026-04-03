@@ -335,7 +335,7 @@ docker compose up -d
 
 ### Option E — Vercel (serverless)
 
-The repo includes `api/index.ts` and `vercel.json` so the HTTP MCP runs as a Vercel Node function. The build runs `npm run build` (TypeScript → `build/`, resources copied).
+The repo includes `api/index.ts` and `vercel.json` so the HTTP MCP runs as a Vercel Node function. The build runs `npm run build` (TypeScript → `build/`, resources copied, then `scripts/ensure-public-dir.cjs` so a **`public/`** directory exists). `vercel.json` sets **`outputDirectory`: `public`** so Vercel does not fail with “No Output Directory named public”. If the dashboard overrides this, set **Output Directory** to `public` or leave it empty and rely on `vercel.json`.
 
 1. Install the CLI: `npm i -g vercel`
 2. From the project root: `vercel` (link the project) then `vercel --prod` for production.
