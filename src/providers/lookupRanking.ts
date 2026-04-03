@@ -1,6 +1,6 @@
 import { SearchResult } from './VendorProvider';
 
-/** Max PDFs to return in lookup_electronics_doc suggestedDocuments (metadata only; no download). */
+/** Max PDFs to return in lookup_doc suggestedDocuments (metadata only; no download). */
 export const LOOKUP_SUGGESTED_MAX = 25;
 
 /**

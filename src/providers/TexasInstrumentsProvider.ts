@@ -246,7 +246,7 @@ export class TexasInstrumentsProvider extends VendorProvider {
 
         const suggestedDocuments = capSuggestedDocuments(sortSearchResultsForLookup(question, docs));
         steps.push('suggested_documents_only');
-        steps.push('next_step_read_electronics_doc');
+        steps.push('next_step_read_doc');
         return { chunks: [], steps, suggestedDocuments };
     }
 
@@ -263,7 +263,7 @@ export class TexasInstrumentsProvider extends VendorProvider {
         const meta = findDocumentByUrl(docUrl);
         if (!meta) {
             throw new Error(
-                `No document in the index for this URL. Index it first with read_electronics_doc. URL: ${docUrl}`
+                `No document in the index for this URL. Index it first with read_doc. URL: ${docUrl}`
             );
         }
         if (meta.vendor !== this.vendorId) {

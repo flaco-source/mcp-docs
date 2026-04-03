@@ -4,7 +4,7 @@ exports.VendorProvider = void 0;
 class VendorProvider {
     /**
      * Query local FTS first; if no hits, discover PDF links via searchDocs and return suggestedDocuments
-     * (does not download or index — use read_electronics_doc). maxDocsToIndex in options is ignored.
+     * (does not download or index — use read_doc). maxDocsToIndex in options is ignored.
      */
     async lookupDoc(_partQuery, _question, _options) {
         throw new Error(`Orchestrated lookup is not implemented for vendor '${this.vendorId}'.`);

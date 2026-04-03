@@ -6,23 +6,27 @@
   "scripts": {
     "test": "node scripts/agent-flow/run-default-smoke.cjs",
     "start": "tsx src/index.ts",
+    "start:http": "tsx src/server-http.ts",
     "test:agent": "tsx scripts/agent-flow/run.ts",
-    "build": "tsc && node -e \"const fs=require('fs'),p=require('path');const d=p.join('build','resources');fs.mkdirSync(d,{recursive:true});fs.copyFileSync(p.join('src','resources','tool-usage-guide.md'),p.join(d,'tool-usage-guide.md'));\""
+    "build": "tsc && node -e \"const fs=require('fs'),p=require('path');const d=p.join('build','resources');fs.mkdirSync(d,{recursive:true});fs.copyFileSync(p.join('src','resources','tool-usage-guide.md'),p.join(d,'tool-usage-guide.md'));\"",
+    "start:http:prod": "node build/server-http.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^2.0.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "axios": "^1.13.6",
     "better-sqlite3": "^12.6.2",
     "cheerio": "^1.2.0",
+    "express": "^5.2.1",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.5.207"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
     "@types/node": "^25.3.3",
     "@types/pdf-parse": "^1.1.5",
     "ts-node": "^10.9.2",

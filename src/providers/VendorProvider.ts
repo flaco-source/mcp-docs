@@ -6,17 +6,17 @@ export interface ReadDocMeta {
     title?: string;
 }
 
-/** Result of lookup_electronics_doc: FTS over existing index only; suggested PDFs are metadata (use read_electronics_doc to index). */
+/** Result of lookup_doc: FTS over existing index only; suggested PDFs are metadata (use read_doc to index). */
 export interface LookupResult {
     chunks: ChunkResult[];
     steps: string[];
-    /** Prioritized URLs/titles when the index had no match — caller must read_electronics_doc to index. */
+    /** Prioritized URLs/titles when the index had no match — caller must read_doc to index. */
     suggestedDocuments?: SearchResult[];
     /** Deprecated: lookup no longer downloads PDFs; kept empty for backward compatibility. */
     indexedUrls?: string[];
 }
 
-/** Full indexed text for one or more PDF pages (read_electronics_doc_page). */
+/** Full indexed text for one or more PDF pages (read_doc_page). */
 export interface DocumentPageResult {
     docTitle: string;
     docUrl: string;
@@ -73,7 +73,7 @@ export abstract class VendorProvider {
 
     /**
      * Query local FTS first; if no hits, discover PDF links via searchDocs and return suggestedDocuments
-     * (does not download or index — use read_electronics_doc). maxDocsToIndex in options is ignored.
+     * (does not download or index — use read_doc). maxDocsToIndex in options is ignored.
      */
     async lookupDoc(
         _partQuery: string,
