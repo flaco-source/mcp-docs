@@ -10,6 +10,7 @@ const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const types_js_1 = require("@modelcontextprotocol/sdk/types.js");
 const TexasInstrumentsProvider_js_1 = require("./providers/TexasInstrumentsProvider.js");
 const StMicroelectronicsProvider_js_1 = require("./providers/StMicroelectronicsProvider.js");
+const DocumentCache_js_1 = require("./cache/DocumentCache.js");
 const RESOURCE_GUIDE_URI = "electronics-docs://guide/tool-usage";
 function loadToolUsageGuide() {
     const guidePath = path_1.default.join(__dirname, "resources", "tool-usage-guide.md");
@@ -22,17 +23,17 @@ function loadToolUsageGuide() {
 }
 const server = new index_js_1.Server({
     name: "electronics-docs-mcp-server",
-    version: "2.2.0",
+    version: "2.4.0",
 }, {
     capabilities: {
         tools: {},
         resources: {},
     },
-    instructions: "Electronics documentation MCP: see resource " +
+    instructions: "Electronics documentation MCP (TI, ST): see resource " +
         RESOURCE_GUIDE_URI +
-        " for when to use lookup_electronics_doc vs read_electronics_doc (direct PDF URLs). " +
-        "After search returns a page number, use read_electronics_doc_page for full page text. " +
-        "Tools: lookup_electronics_doc, search_electronics_docs, read_electronics_doc, query_doc_content, read_electronics_doc_page.",
+        ". lookup_electronics_doc queries the local index only and returns suggestedDocuments when empty — it does NOT download PDFs; use read_electronics_doc to index. " +
+        "After query_doc_content returns pageNum, use read_electronics_doc_page for full page text. " +
+        "Tools: lookup_electronics_doc, search_electronics_docs, read_electronics_doc, query_doc_content, read_electronics_doc_page, list_indexed_documents.",
 });
 const tiProvider = new TexasInstrumentsProvider_js_1.TexasInstrumentsProvider();
 const stProvider = new StMicroelectronicsProvider_js_1.StMicroelectronicsProvider();
@@ -72,10 +73,11 @@ server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => {
         tools: [
             {
                 name: "lookup_electronics_doc",
-                description: "Orchestrated search for a **part number**: queries the index, then discovers PDFs from the TI **product page** if needed. " +
-                    "Does **not** use arbitrary direct datasheet URLs (e.g. `/lit/ds/symlink/...pdf`); for those, call **read_electronics_doc** with the URL first. " +
-                    "After you have a **page number** from search results, use **read_electronics_doc_page** for full page text. " +
-                    "See MCP resource " +
+                description: "Part number + question: **FTS over the local index only** — does **not** download or index PDFs. " +
+                    "If the index matches, returns **chunks**; otherwise returns **suggestedDocuments** (prioritized PDF URLs from the vendor site). " +
+                    "Next step: **read_electronics_doc** on a chosen URL, then **query_doc_content**. " +
+                    "TI symlink datasheets may be missing from suggestions — use **read_electronics_doc** if you already have the PDF URL. " +
+                    "See resource " +
                     RESOURCE_GUIDE_URI +
                     ".",
                 inputSchema: {
@@ -95,7 +97,7 @@ server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => {
                         },
                         maxDocsToIndex: {
                             type: "number",
-                            description: "Max PDFs to download/index in this call if the index had no match (default 3, max 5).",
+                            description: "Ignored (legacy). Lookup does not index PDFs; use read_electronics_doc.",
                         },
                     },
                     required: ["vendor", "part", "question"],
@@ -104,7 +106,7 @@ server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => {
             {
                 name: "search_electronics_docs",
                 description: "**Primitive**: list PDF links (datasheet, TRM, app notes) for a part from the vendor site. " +
-                    "Does not index or answer questions by itself. Prefer lookup_electronics_doc for end-user queries.",
+                    "Does not index. After lookup returns only suggestions, you can use this for a fuller link list.",
                 inputSchema: {
                     type: "object",
                     properties: {
@@ -151,7 +153,7 @@ server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => {
             {
                 name: "query_doc_content",
                 description: "BM25 full-text search over indexed chunks. Each hit includes **docUrl** and **pageNum** — use them with **read_electronics_doc_page** for full page text. " +
-                    "Requires PDFs to be indexed first (read_electronics_doc or lookup_electronics_doc).",
+                    "Requires PDFs indexed via **read_electronics_doc** (lookup alone does not index).",
                 inputSchema: {
                     type: "object",
                     properties: {
@@ -184,7 +186,7 @@ server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => {
             },
             {
                 name: "read_electronics_doc_page",
-                description: "Return **full indexed plain text** for one PDF page or a **page range** (after query_doc_content / lookup gives you pageNum). " +
+                description: "Return **full indexed plain text** for one PDF page or a **page range** (after query_doc_content gives you pageNum). " +
                     "Requires the document to already be indexed. Pass **docUrl** exactly as in search results (or the PDF URL used with read_electronics_doc). " +
                     "Use this when snippets are too short for tables or register maps.",
                 inputSchema: {
@@ -214,6 +216,27 @@ server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => {
                     required: ["vendor", "docUrl", "page"],
                 },
             },
+            {
+                name: "list_indexed_documents",
+                description: "List **indexed** PDF metadata from the local database (no web fetch). " +
+                    "Returns **count** and **documents** (id, part, title, docType, url, indexedAt). " +
+                    "Optional **part** filters to that part number (normalized like other tools). " +
+                    "Omit **part** to list all documents for the vendor.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        vendor: {
+                            type: "string",
+                            description: "Vendor ID: **TI** or **ST**.",
+                        },
+                        part: {
+                            type: "string",
+                            description: "Optional part number (e.g. **STM32G071RB**). If omitted, all indexed docs for the vendor are returned.",
+                        },
+                    },
+                    required: ["vendor"],
+                },
+            },
         ],
     };
 });
@@ -221,6 +244,38 @@ server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     if (!args) {
         throw new Error("Missing arguments");
+    }
+    if (name === "list_indexed_documents") {
+        const vendorRaw = args.vendor?.trim();
+        if (!vendorRaw) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Missing vendor." }],
+            };
+        }
+        const v = vendorRaw.toUpperCase();
+        if (v !== "TI" && v !== "ST") {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "Vendor must be TI or ST." }],
+            };
+        }
+        const partArg = args.part;
+        const documents = (0, DocumentCache_js_1.listIndexedDocuments)(v, partArg);
+        return {
+            isError: false,
+            content: [
+                {
+                    type: "text",
+                    text: JSON.stringify({
+                        vendor: v,
+                        partFilter: partArg?.trim() || null,
+                        count: documents.length,
+                        documents,
+                    }, null, 2),
+                },
+            ],
+        };
     }
     const vendorId = args.vendor;
     const provider = vendors[vendorId];
@@ -300,7 +355,7 @@ server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
                             type: "text",
                             text: `No indexed content matched '${query}'.` +
                                 (part ? ` (part: ${part})` : "") +
-                                `\n\nTip: use lookup_electronics_doc, or read_electronics_doc to index a PDF first.`,
+                                `\n\nTip: read_electronics_doc to index a PDF; lookup_electronics_doc only suggests URLs until you read.`,
                         },
                     ],
                 };
@@ -360,7 +415,7 @@ server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
 async function main() {
     const transport = new stdio_js_1.StdioServerTransport();
     await server.connect(transport);
-    console.error("Electronics Docs MCP Server v2.2 running on stdio (tools + resources)");
+    console.error("Electronics Docs MCP Server v2.4 running on stdio (tools + resources)");
 }
 main().catch((error) => {
     console.error("Server error:", error);

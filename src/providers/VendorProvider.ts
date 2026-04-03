@@ -6,10 +6,13 @@ export interface ReadDocMeta {
     title?: string;
 }
 
-/** Result of orchestrated search + optional indexing + query (lookup_electronics_doc). */
+/** Result of lookup_electronics_doc: FTS over existing index only; suggested PDFs are metadata (use read_electronics_doc to index). */
 export interface LookupResult {
     chunks: ChunkResult[];
     steps: string[];
+    /** Prioritized URLs/titles when the index had no match — caller must read_electronics_doc to index. */
+    suggestedDocuments?: SearchResult[];
+    /** Deprecated: lookup no longer downloads PDFs; kept empty for backward compatibility. */
     indexedUrls?: string[];
 }
 
@@ -69,8 +72,8 @@ export abstract class VendorProvider {
     ): Promise<ChunkResult[]>;
 
     /**
-     * Orchestrated flow: query index, discover docs if needed, index PDFs, then search again.
-     * Override in vendors that support it; default throws.
+     * Query local FTS first; if no hits, discover PDF links via searchDocs and return suggestedDocuments
+     * (does not download or index — use read_electronics_doc). maxDocsToIndex in options is ignored.
      */
     async lookupDoc(
         _partQuery: string,

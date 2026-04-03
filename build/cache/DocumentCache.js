@@ -7,6 +7,7 @@ exports.normalizeTiDocumentUrl = normalizeTiDocumentUrl;
 exports.findDocumentByUrl = findDocumentByUrl;
 exports.getDocument = getDocument;
 exports.getDocumentsByPart = getDocumentsByPart;
+exports.listIndexedDocuments = listIndexedDocuments;
 exports.vendorPartHasIndexedChunks = vendorPartHasIndexedChunks;
 exports.updateDocumentPartIfUnknown = updateDocumentPartIfUnknown;
 exports.insertDocument = insertDocument;
@@ -123,6 +124,28 @@ function getDocumentsByPart(vendor, part) {
     return rows.map(r => ({
         id: r.id, vendor: r.vendor, part: r.part,
         title: r.title, docType: r.doc_type, url: r.url, indexedAt: r.indexed_at,
+    }));
+}
+/**
+ * List indexed document metadata for a vendor, optionally filtered by exact part (normalized uppercase).
+ */
+function listIndexedDocuments(vendor, part) {
+    const v = vendor.trim().toUpperCase();
+    if (part !== undefined && part.trim() !== '') {
+        const p = part.trim().toUpperCase().replace(/\s+/g, '');
+        return getDocumentsByPart(v, p);
+    }
+    const rows = db()
+        .prepare('SELECT * FROM documents WHERE vendor = ? ORDER BY part, doc_type, title')
+        .all(v);
+    return rows.map((r) => ({
+        id: r.id,
+        vendor: r.vendor,
+        part: r.part,
+        title: r.title,
+        docType: r.doc_type,
+        url: r.url,
+        indexedAt: r.indexed_at,
     }));
 }
 /**

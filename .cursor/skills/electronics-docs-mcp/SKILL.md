@@ -1,38 +1,45 @@
 ---
 name: electronics-docs-mcp
 description: >-
-  Use the Electronics Docs MCP: lookup_electronics_doc for part+question; read_electronics_doc for
-  direct PDF URLs (especially /lit/ds/symlink/...); read_electronics_doc_page when you have pageNum
-  and docUrl from search; read resource electronics-docs://guide/tool-usage for full guidelines.
+  Electronics Docs MCP (TI, ST): list_indexed_documents for indexed PDF counts; lookup_electronics_doc
+  queries FTS only; read_electronics_doc to index; query_doc_content and read_electronics_doc_page after
+  indexing. Read resource electronics-docs://guide/tool-usage.
 ---
 
 # Electronics Docs MCP — Agent instructions
 
 ## When this applies
 
-Whenever the workspace uses the **electronics-docs** MCP (Texas Instruments PDFs, local FTS index).
+Whenever the workspace uses the **electronics-docs** MCP (TI/ST PDFs, local FTS index).
 
 ## Which tool to call first
 
 | Situation | Tool |
 |-----------|------|
 | User gives a **part number** and a **question** (no PDF URL) | **`lookup_electronics_doc`** |
-| User gives a **direct PDF URL** (e.g. `.../lit/ds/symlink/...pdf` or `/lit/ug/...`) | **`read_electronics_doc`** with that URL + **`part`** if known |
-| Search already returned **`pageNum`** and you need **full page / table** | **`read_electronics_doc_page`** with **`docUrl`** from the result + **`page`** |
+| Lookup returned **`suggestedDocuments`** but no **`chunks`** | **`read_electronics_doc`** on a chosen URL, then **`query_doc_content`** |
+| User gives a **direct PDF URL** (e.g. TI `/lit/ds/symlink/...pdf`, ST `/resource/en/...pdf`) | **`read_electronics_doc`** with URL + **`part`** if known |
+| Search returned **`pageNum`** and you need **full page / table** | **`read_electronics_doc_page`** with **`docUrl`** + **`page`** |
+| **How many PDFs are indexed** for a vendor/part (no SQL) | **`list_indexed_documents`** with **`vendor`** + optional **`part`** |
 
-### Why both lookup and read?
+### Lookup vs read
 
-- **`lookup_electronics_doc`** discovers documents from the **TI product page**. It aligns well with links like **`/lit/ug/...`** (TRMs) that appear there.
-- **Direct datasheet URLs** such as **`https://www.ti.com/lit/ds/symlink/<part>.pdf`** are not always discoverable the same way. If you have that URL, **`read_electronics_doc`** is the right first step.
+- **`lookup_electronics_doc`** does **not** download or index PDFs. It either returns **`chunks`** from the existing index or **`suggestedDocuments`** (prioritized links).
+- **`read_electronics_doc`** indexes a PDF. **`maxDocsToIndex`** on lookup is legacy and ignored.
+
+### TI vs ST
+
+- **TI:** Symlink datasheet URLs may not appear in **`suggestedDocuments`**; if the user has that URL, **`read_electronics_doc`** first.
+- **ST:** **`search_electronics_docs`** can return more links than lookup suggestions (lookup filters flyers / tape-and-reel noise from suggestions only).
 
 ## Follow-up sequence
 
-1. Run **`query_doc_content`** or **`lookup_electronics_doc`** to get hits. Each hit includes **`docUrl`** (use it verbatim for the next step).
-2. If snippets are insufficient, call **`read_electronics_doc_page`** with **`vendor`**, **`docUrl`**, **`page`** (same as `pageNum`). Use **`pageEnd`** only when you need a **page range**.
+1. After indexing: **`query_doc_content`** or use **`chunks`** from lookup if already indexed.
+2. Use **`docUrl`** verbatim for **`read_electronics_doc_page`** with **`page`** = **`pageNum`**.
 
-## Onboarding text
+## Onboarding
 
-Call **`resources/list`** / **`resources/read`** on URI **`electronics-docs://guide/tool-usage`**, or read [`src/resources/tool-usage-guide.md`](../../../src/resources/tool-usage-guide.md) in this repo.
+**`resources/read`** URI **`electronics-docs://guide/tool-usage`**, or [`src/resources/tool-usage-guide.md`](../../../src/resources/tool-usage-guide.md).
 
 ## Limits
 
@@ -40,4 +47,4 @@ Lexical search only; PDF layout may be imperfect; no image/schematic understandi
 
 ## Version
 
-Aligned with MCP server v2.2+ (`read_electronics_doc_page`, `docUrl` on search results).
+Aligned with MCP server **v2.4+** (**`list_indexed_documents`**; lookup returns **`suggestedDocuments`** without indexing; ST **`getDocumentPageText`**).

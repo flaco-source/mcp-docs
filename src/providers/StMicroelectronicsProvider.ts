@@ -1,4 +1,4 @@
-import { VendorProvider, SearchResult, ReadDocMeta } from './VendorProvider';
+import { VendorProvider, SearchResult, ReadDocMeta, LookupResult, DocumentPageResult } from './VendorProvider';
 import {
     getDocument,
     getDocumentsByPart,
@@ -9,8 +9,10 @@ import {
     ChunkResult,
     updateDocumentPartIfUnknown,
     findDocumentByUrl,
+    getIndexedTextForDocPages,
 } from '../cache/DocumentCache';
-import { fetchPdfBuffer, extractPdfPages } from './pdfExtract';
+import { sortSearchResultsForLookup, capSuggestedDocuments } from './lookupRanking';
+import { fetchPdfBuffer, extractPdfPages, type FetchPdfOptions } from './pdfExtract';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const cheerio = require('cheerio');
@@ -40,6 +42,8 @@ const ST_FETCH_HEADERS: Record<string, string> = {
 
 const ST_HTML_TIMEOUT_MS = 20_000;
 const ST_SEARCH_API_TIMEOUT_MS = 25_000;
+
+const ST_PDF_FETCH_OPTS: FetchPdfOptions = { useNativeFetch: true };
 
 // ─── Native fetch helpers (axios blocked by Akamai CDN TLS fingerprinting) ───
 
@@ -289,6 +293,17 @@ function isStDocInDb(url: string): boolean {
     return meta !== null && meta.vendor === 'ST';
 }
 
+/** Drop obvious non-technical PDFs from lookup suggestions only (searchDocs still returns full merge). */
+function stExcludeNoiseFromLookupCandidates(docs: SearchResult[]): SearchResult[] {
+    return docs.filter((d) => {
+        const u = d.url.toLowerCase();
+        if (u.includes('/flyer/') || u.includes('/product_presentation/')) return false;
+        const t = d.title.toLowerCase();
+        if (/tape\s+and\s+reel|shipping\s+media/i.test(t)) return false;
+        return true;
+    });
+}
+
 export class StMicroelectronicsProvider extends VendorProvider {
     readonly vendorId = 'ST';
     readonly vendorName = 'STMicroelectronics';
@@ -414,7 +429,7 @@ export class StMicroelectronicsProvider extends VendorProvider {
             return `[CACHED] Document '${existing.title}' is already indexed.`;
         }
 
-        const pdfBuffer = await fetchPdfBuffer(urlNoQuery);
+        const pdfBuffer = await fetchPdfBuffer(urlNoQuery, ST_PDF_FETCH_OPTS);
         const pages = await extractPdfPages(pdfBuffer);
 
         const partForRow = meta?.part?.trim().toUpperCase().replace(/\s+/g, '') ?? 'UNKNOWN';
@@ -467,5 +482,82 @@ export class StMicroelectronicsProvider extends VendorProvider {
             res = await searchChunks(query, { vendor: this.vendorId, docType, limit: lim });
         }
         return res;
+    }
+
+    override async lookupDoc(
+        partQuery: string,
+        question: string,
+        _options?: { maxDocsToIndex?: number }
+    ): Promise<LookupResult> {
+        const steps: string[] = [];
+        const tryQuery = async (): Promise<ChunkResult[]> =>
+            this.queryContent(question, partQuery, undefined, 8);
+
+        let chunks = await tryQuery();
+        if (chunks.length > 0) {
+            steps.push('query_existing_index');
+            return { chunks, steps };
+        }
+        steps.push('no_prior_index_match');
+
+        const docs = await this.searchDocs(partQuery);
+        if (docs.length === 0) {
+            steps.push('search_docs_empty');
+            return {
+                chunks: [],
+                steps: [...steps, `No documents found for part '${partQuery}'.`],
+            };
+        }
+
+        const filtered = stExcludeNoiseFromLookupCandidates(docs);
+        const suggestedDocuments = capSuggestedDocuments(sortSearchResultsForLookup(question, filtered));
+        steps.push('suggested_documents_only');
+        steps.push('next_step_read_electronics_doc');
+        return { chunks: [], steps, suggestedDocuments };
+    }
+
+    override async getDocumentPageText(
+        docUrl: string,
+        page: number,
+        options?: { pageEnd?: number; maxChars?: number }
+    ): Promise<DocumentPageResult> {
+        const pageEnd = options?.pageEnd ?? page;
+        const maxChars = Math.min(options?.maxChars ?? 120_000, 500_000);
+        if (page < 1 || pageEnd < 1) {
+            throw new Error('page and pageEnd must be >= 1');
+        }
+        const meta = findDocumentByUrl(docUrl) ?? findDocumentByUrl(normalizeStPdfCanonical(docUrl));
+        if (!meta) {
+            throw new Error(
+                `No document in the index for this URL. Index it first with read_electronics_doc. URL: ${docUrl}`
+            );
+        }
+        if (meta.vendor !== this.vendorId) {
+            throw new Error(`Document vendor mismatch: expected ${this.vendorId}`);
+        }
+        if (!hasChunks(meta.id)) {
+            throw new Error(`Document is not indexed yet: ${meta.title}`);
+        }
+        const { text, truncated, pageFrom, pageTo } = getIndexedTextForDocPages(
+            meta.id,
+            page,
+            pageEnd,
+            maxChars
+        );
+        if (!text.length) {
+            throw new Error(
+                `No indexed text for pages ${Math.min(page, pageEnd)}–${Math.max(page, pageEnd)} in "${meta.title}". ` +
+                    `The page may be out of range, blank, or not extracted from the PDF.`
+            );
+        }
+        return {
+            docTitle: meta.title,
+            docUrl: meta.url,
+            pageFrom,
+            pageTo,
+            text,
+            truncated,
+            charCount: text.length,
+        };
     }
 }

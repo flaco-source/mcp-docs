@@ -1,20 +1,20 @@
 # Electronics Docs MCP Server
 
-An MCP (Model Context Protocol) server that gives LLMs direct access to **official vendor PDF documentation** (starting with **Texas Instruments**), with a **local SQLite full-text index** (FTS5 + BM25) so answers can be grounded in real datasheet and TRM text.
+An MCP (Model Context Protocol) server that gives LLMs direct access to **official vendor PDF documentation** (**Texas Instruments** and **STMicroelectronics**), with a **local SQLite full-text index** (FTS5 + BM25) so answers can be grounded in real datasheet and TRM text.
 
 ## Tools
 
 
 | Tool                            | Role                                                                                                                            |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `**lookup_electronics_doc`**    | Part + question: searches the index, then discovers PDFs from the TI **product page** (best for typical `/lit/ug/...` links).   |
+| `**lookup_electronics_doc`**    | Part + question: **FTS on the local index only**; if no match, returns **`suggestedDocuments`** (links from the vendor site). Does **not** download PDFs — use **`read_electronics_doc`** next. |
 | `search_electronics_docs`       | List PDF links for a part (metadata only).                                                                                      |
 | `**read_electronics_doc`**      | Index a PDF by **direct URL** — use for `/lit/ds/symlink/....pdf` and any link the user already has. Optional `part` / `title`. |
 | `query_doc_content`             | BM25 search; each hit includes `**docUrl`** and `**pageNum**`.                                                                  |
 | `**read_electronics_doc_page**` | Full indexed text for **page** or **page range** (`docUrl` from search results).                                                |
 
 
-**When to use:** `lookup` for part discovery; `**read_electronics_doc`** when you already have the exact PDF URL (symlink datasheets often need this). After search, use `**read_electronics_doc_page**` for full page context. See `[src/resources/tool-usage-guide.md](src/resources/tool-usage-guide.md)`.
+**When to use:** `lookup` for index check + suggested URLs; `**read_electronics_doc`** to index; `**read_electronics_doc_page**` after `query_doc_content` when you need full page text. TI symlink datasheets often need **`read_electronics_doc`** directly. See `[src/resources/tool-usage-guide.md](src/resources/tool-usage-guide.md)`.
 
 ## MCP resources
 
@@ -28,7 +28,7 @@ The server advertises `**instructions**` on initialize pointing agents to this r
 
 ## Cursor skill (optional)
 
-Project skill for agents: `[.cursor/skills/electronics-docs-mcp/SKILL.md](.cursor/skills/electronics-docs-mcp/SKILL.md)`. Copy to `~/.cursor/skills/` if you want it globally.
+Project skills: [`electronics-docs-mcp`](.cursor/skills/electronics-docs-mcp/SKILL.md), [`electronics-docs-mcp-ti`](.cursor/skills/electronics-docs-mcp-ti/SKILL.md), [`electronics-docs-mcp-st`](.cursor/skills/electronics-docs-mcp-st/SKILL.md). Copy to `~/.cursor/skills/` if you want them globally.
 
 ## Supported vendors
 
@@ -36,7 +36,7 @@ Project skill for agents: `[.cursor/skills/electronics-docs-mcp/SKILL.md](.curso
 | Vendor ID | Name               | Status    |
 | --------- | ------------------ | --------- |
 | `TI`      | Texas Instruments  | Supported |
-| `ST`      | STMicroelectronics | Planned   |
+| `ST`      | STMicroelectronics | Supported |
 
 
 ## Adding a new vendor (hot plug)
@@ -84,11 +84,15 @@ The image expects `build/` to include `resources/` (run `npm run build` before `
 ## Testing
 
 ```bash
-npm run build
-npx tsx test-client.ts
+npm test
+# build + `run.ts all` without inheriting AGENT_E2E_READ from the shell (see run-default-smoke.cjs)
 ```
 
-Exercises **resources/read**, `**lookup_electronics_doc`**, and live TI PDF indexing (network required).
+[`scripts/agent-flow/run.ts`](scripts/agent-flow/run.ts) covers resource, search, lookup (TI + ST), and optionally read/query/page/flow. By default **`AGENT_E2E_READ` is unset**, so PDF downloads are skipped. Set `AGENT_E2E_READ=1` for full read/query/page (network required).
+
+```bash
+npx tsx scripts/agent-flow/run.ts --tool search --vendor ST
+```
 
 ## Project structure
 

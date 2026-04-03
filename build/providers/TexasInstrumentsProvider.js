@@ -7,6 +7,7 @@ exports.TexasInstrumentsProvider = void 0;
 const axios_1 = __importDefault(require("axios"));
 const VendorProvider_1 = require("./VendorProvider");
 const DocumentCache_1 = require("../cache/DocumentCache");
+const lookupRanking_1 = require("./lookupRanking");
 const pdfExtract_1 = require("./pdfExtract");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const cheerio = require('cheerio');
@@ -175,42 +176,13 @@ class TexasInstrumentsProvider extends VendorProvider_1.VendorProvider {
         }
         return res;
     }
-    /**
-     * Prefer TRM/user guide for register-level questions; datasheet first for general specs.
-     */
-    sortDocsForIndexing(question, docs) {
-        const q = question.toLowerCase();
-        const prefersTRM = /0x|register|bitfield|bit\b|address|trm|manual|reference|memory map|subsystem|command|i2c|smbus/i.test(q);
-        const rank = (t) => {
-            if (prefersTRM) {
-                if (t === 'user_guide')
-                    return 0;
-                if (t === 'datasheet')
-                    return 1;
-                if (t === 'application_note')
-                    return 2;
-                return 3;
-            }
-            if (t === 'datasheet')
-                return 0;
-            if (t === 'user_guide')
-                return 1;
-            if (t === 'application_note')
-                return 2;
-            return 3;
-        };
-        return [...docs].sort((a, b) => rank(a.type) - rank(b.type));
-    }
-    async lookupDoc(partQuery, question, options) {
-        const maxDocs = Math.min(Math.max(options?.maxDocsToIndex ?? 3, 1), 5);
-        const { basePart, exactPart } = parsePartNumber(partQuery);
+    async lookupDoc(partQuery, question, _options) {
         const steps = [];
-        const indexedUrls = [];
         const tryQuery = async () => this.queryContent(question, partQuery, undefined, 8);
         let chunks = await tryQuery();
         if (chunks.length > 0) {
             steps.push('query_existing_index');
-            return { chunks, steps, indexedUrls };
+            return { chunks, steps };
         }
         steps.push('no_prior_index_match');
         const docs = await this.searchDocs(partQuery);
@@ -219,46 +191,12 @@ class TexasInstrumentsProvider extends VendorProvider_1.VendorProvider {
             return {
                 chunks: [],
                 steps: [...steps, `No documents found for part '${partQuery}'.`],
-                indexedUrls,
             };
         }
-        const savedPartForMeta = docs.length > 0 && docs[0].url.toLowerCase().includes(exactPart.toLowerCase())
-            ? exactPart
-            : basePart;
-        const sorted = this.sortDocsForIndexing(question, docs);
-        let indexedCount = 0;
-        for (const doc of sorted) {
-            if (indexedCount >= maxDocs)
-                break;
-            const existing = (0, DocumentCache_1.getDocument)(doc.url);
-            if (existing && (0, DocumentCache_1.hasChunks)(existing.id)) {
-                steps.push(`skip_already_indexed:${doc.title}`);
-                continue;
-            }
-            try {
-                await this.readDoc(doc.url, { part: savedPartForMeta, title: doc.title });
-            }
-            catch (e) {
-                const msg = e?.message ?? String(e);
-                steps.push(`fetch_failed:${doc.title}:${msg}`);
-                continue;
-            }
-            indexedUrls.push((0, DocumentCache_1.normalizeTiDocumentUrl)(doc.url));
-            indexedCount += 1;
-            steps.push(`indexed:${doc.title}`);
-            chunks = await tryQuery();
-            if (chunks.length > 0) {
-                steps.push('query_after_index');
-                return { chunks, steps, indexedUrls };
-            }
-        }
-        chunks = await tryQuery();
-        if (chunks.length > 0) {
-            steps.push('query_after_all_indexed');
-            return { chunks, steps, indexedUrls };
-        }
-        steps.push('indexed_but_no_fts_match');
-        return { chunks: [], steps, indexedUrls };
+        const suggestedDocuments = (0, lookupRanking_1.capSuggestedDocuments)((0, lookupRanking_1.sortSearchResultsForLookup)(question, docs));
+        steps.push('suggested_documents_only');
+        steps.push('next_step_read_electronics_doc');
+        return { chunks: [], steps, suggestedDocuments };
     }
     async getDocumentPageText(docUrl, page, options) {
         const pageEnd = options?.pageEnd ?? page;

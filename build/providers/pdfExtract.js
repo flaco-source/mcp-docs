@@ -27,41 +27,73 @@ function isPdfBuffer(buf) {
     const head = buf.slice(0, 5).toString('binary');
     return head.startsWith('%PDF');
 }
+async function fetchUrlWithAxios(u, timeoutMs) {
+    try {
+        const response = await axios_1.default.get(u, {
+            responseType: 'arraybuffer',
+            headers: exports.HEADERS_PDF,
+            timeout: timeoutMs,
+            maxRedirects: 5,
+            validateStatus: (s) => s >= 200 && s < 400,
+        });
+        if (response.status === 404) {
+            return { buf: null, message: `HTTP 404 for ${u}` };
+        }
+        if (response.status !== 200 || !response.data) {
+            return { buf: null, message: `HTTP ${response.status} for ${u}` };
+        }
+        const buf = Buffer.from(response.data);
+        if (isPdfBuffer(buf)) {
+            return { buf, message: '' };
+        }
+        return { buf: null, message: `Response at ${u} is not a PDF (wrong content type or HTML error page)` };
+    }
+    catch (e) {
+        const status = e?.response?.status;
+        return { buf: null, message: status ? `HTTP ${status} for ${u}` : (e?.message ?? String(e)) };
+    }
+}
+async function fetchUrlWithNativeFetch(u, timeoutMs) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+        const res = await fetch(u, {
+            signal: ctrl.signal,
+            headers: { ...exports.HEADERS_PDF, Referer: 'https://www.st.com/' },
+            redirect: 'follow',
+        });
+        clearTimeout(timer);
+        if (!res.ok) {
+            return { buf: null, message: `HTTP ${res.status} for ${u}` };
+        }
+        const arrayBuf = await res.arrayBuffer();
+        const buf = Buffer.from(arrayBuf);
+        if (isPdfBuffer(buf)) {
+            return { buf, message: '' };
+        }
+        return { buf: null, message: `Response at ${u} is not a PDF (wrong content type or HTML error page)` };
+    }
+    catch (e) {
+        clearTimeout(timer);
+        return { buf: null, message: e?.message ?? String(e) };
+    }
+}
 /**
  * Try URL variants; verify PDF magic bytes.
+ * Pass `useNativeFetch: true` for hosts that block axios (Akamai TLS fingerprinting).
  */
-async function fetchPdfBuffer(url) {
+async function fetchPdfBuffer(url, options) {
     const trimmed = url.trim();
     const noQuery = trimmed.split('?')[0];
     const candidates = Array.from(new Set([trimmed, noQuery].filter(Boolean)));
+    const timeoutMs = options?.timeoutMs ?? 90_000;
+    const fetcher = options?.useNativeFetch ? fetchUrlWithNativeFetch : fetchUrlWithAxios;
     let lastMessage = 'Unknown error';
     for (const u of candidates) {
-        try {
-            const response = await axios_1.default.get(u, {
-                responseType: 'arraybuffer',
-                headers: exports.HEADERS_PDF,
-                timeout: 90000,
-                maxRedirects: 5,
-                validateStatus: (s) => s >= 200 && s < 400,
-            });
-            if (response.status === 404) {
-                lastMessage = `HTTP 404 for ${u}`;
-                continue;
-            }
-            if (response.status !== 200 || !response.data) {
-                lastMessage = `HTTP ${response.status} for ${u}`;
-                continue;
-            }
-            const buf = Buffer.from(response.data);
-            if (isPdfBuffer(buf)) {
-                return buf;
-            }
-            lastMessage = `Response at ${u} is not a PDF (wrong content type or HTML error page)`;
-        }
-        catch (e) {
-            const status = e?.response?.status;
-            lastMessage = status ? `HTTP ${status} for ${u}` : (e?.message ?? String(e));
-        }
+        const { buf, message } = await fetcher(u, timeoutMs);
+        if (buf)
+            return buf;
+        lastMessage = message;
     }
     throw new Error(`Failed to download PDF from ${url}: ${lastMessage}`);
 }
