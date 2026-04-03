@@ -23,13 +23,22 @@ const vendors = {
     [stProvider.vendorId]: stProvider,
 };
 function loadToolUsageGuide() {
-    const guidePath = path_1.default.join(__dirname, "resources", "tool-usage-guide.md");
-    try {
-        return fs_1.default.readFileSync(guidePath, "utf-8");
+    const candidates = [
+        path_1.default.join(__dirname, "resources", "tool-usage-guide.md"),
+        path_1.default.join(process.cwd(), "build", "resources", "tool-usage-guide.md"),
+        path_1.default.join(process.cwd(), "src", "resources", "tool-usage-guide.md"),
+    ];
+    for (const guidePath of candidates) {
+        try {
+            if (fs_1.default.existsSync(guidePath)) {
+                return fs_1.default.readFileSync(guidePath, "utf-8");
+            }
+        }
+        catch {
+            /* try next */
+        }
     }
-    catch {
-        return `# Tool usage guide\n\nGuide file not found at ${guidePath}. Rebuild the project so build/resources/tool-usage-guide.md exists.`;
-    }
+    return `# Tool usage guide\n\nGuide file not found. Rebuild so build/resources/tool-usage-guide.md exists, or set cwd to project root on serverless.`;
 }
 /**
  * Creates and returns a fully-configured MCP Server instance.
