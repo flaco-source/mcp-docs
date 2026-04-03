@@ -216,7 +216,7 @@ Heurística sugerida para STM32:
 - `StMicroelectronicsProvider` (`vendorId: 'ST'`): `searchDocs` raspa **en paralelo** la página del producto y la de documentación de serie (timeout corto por petición; tiempo total ≈ el de la más lenta, no la suma). Se fusionan enlaces del HTML + **PDFs conocidos por familia** (`ST_SERIES_KNOWN_PDFS`, p. ej. RM0444 para `stm32g0-series`) cuando el portal no expone PDFs en HTML estático, más fallback de datasheet. Se **unen** filas ya guardadas en SQLite para ese `part` que no salieron del scrape. Cada ítem lleva `cached` según si la URL ya existía para `vendor = ST` antes del `insertDocument` de esa llamada; `readDoc` + `queryContent` como antes.
 - Registro en el servidor MCP junto a TI; herramientas primitivas aceptan `vendor: 'ST'`.
 - Utilidades compartidas en `src/providers/pdfExtract.ts` (TI refactorizado para usarlas).
-- Script manual: `npm run test:st-search` → `scripts/test-st-search-docs.ts` (prueba `searchDocs('STM32G071RB')`).
+- Prueba local: `npx tsx scripts/agent-flow/run.ts search ST` (fixture `STM32G071RB`) o `npm test` (incluye `all`).
 
 **Limitaciones conocidas:**
 

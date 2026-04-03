@@ -4,10 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node scripts/agent-flow/run-default-smoke.cjs",
     "start": "tsx src/index.ts",
-    "test:st-search": "tsx scripts/test-st-search-docs.ts",
-    "test:st-search:debug": "tsx scripts/test-st-search-docs.ts --debug",
+    "test:agent": "tsx scripts/agent-flow/run.ts",
     "build": "tsc && node -e \"const fs=require('fs'),p=require('path');const d=p.join('build','resources');fs.mkdirSync(d,{recursive:true});fs.copyFileSync(p.join('src','resources','tool-usage-guide.md'),p.join(d,'tool-usage-guide.md'));\""
   },
   "keywords": [],

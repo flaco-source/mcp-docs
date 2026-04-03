@@ -143,6 +143,29 @@ export function getDocumentsByPart(vendor: string, part: string): DocumentMeta[]
 }
 
 /**
+ * List indexed document metadata for a vendor, optionally filtered by exact part (normalized uppercase).
+ */
+export function listIndexedDocuments(vendor: string, part?: string): DocumentMeta[] {
+    const v = vendor.trim().toUpperCase();
+    if (part !== undefined && part.trim() !== '') {
+        const p = part.trim().toUpperCase().replace(/\s+/g, '');
+        return getDocumentsByPart(v, p);
+    }
+    const rows = db()
+        .prepare('SELECT * FROM documents WHERE vendor = ? ORDER BY part, doc_type, title')
+        .all(v) as any[];
+    return rows.map((r) => ({
+        id: r.id,
+        vendor: r.vendor,
+        part: r.part,
+        title: r.title,
+        docType: r.doc_type,
+        url: r.url,
+        indexedAt: r.indexed_at,
+    }));
+}
+
+/**
  * True if at least one indexed chunk exists for this vendor and part (any variant: exact or base revision).
  */
 export function vendorPartHasIndexedChunks(vendor: string, part: string): boolean {
