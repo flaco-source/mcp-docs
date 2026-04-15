@@ -12,8 +12,9 @@ const types_js_1 = require("@modelcontextprotocol/sdk/types.js");
 const TexasInstrumentsProvider_js_1 = require("./providers/TexasInstrumentsProvider.js");
 const StMicroelectronicsProvider_js_1 = require("./providers/StMicroelectronicsProvider.js");
 const DocumentCache_js_1 = require("./cache/DocumentCache.js");
+const skillResources_js_1 = require("./skillResources.js");
 exports.SERVER_NAME = "electronics-docs-mcp-server";
-exports.SERVER_VERSION = "2.5.0";
+exports.SERVER_VERSION = "2.6.1";
 const RESOURCE_GUIDE_URI = "electronics-docs://guide/tool-usage";
 // Providers are singletons — they hold the shared SQLite cache state
 const tiProvider = new TexasInstrumentsProvider_js_1.TexasInstrumentsProvider();
@@ -42,34 +43,66 @@ function createMcpServer() {
         capabilities: { tools: {}, resources: {} },
         instructions: "Electronics documentation MCP (TI, ST): see resource " +
             RESOURCE_GUIDE_URI +
-            ". lookup_doc queries the local index only and returns suggestedDocuments when empty — it does NOT download PDFs; use read_doc to index. " +
+            " and list_resources for electronics-docs://skill/<id> (project agent skills as Markdown). " +
+            "lookup_doc queries the local index only and returns suggestedDocuments when empty — it does NOT download PDFs; use read_doc to index. " +
             "After query_doc_content returns pageNum, use read_doc_page for full page text. " +
             "Tools: lookup_doc, search_docs, read_doc, query_doc_content, read_doc_page, list_indexed_documents.",
     });
-    server.setRequestHandler(types_js_1.ListResourcesRequestSchema, async () => ({
-        resources: [
-            {
-                uri: RESOURCE_GUIDE_URI,
-                name: "Tool usage guide",
-                description: "How to use lookup_doc and primitive tools; limits and best practices (Markdown).",
+    server.setRequestHandler(types_js_1.ListResourcesRequestSchema, async () => {
+        const skillsRoot = (0, skillResources_js_1.resolveSkillsRoot)();
+        const skillIds = skillsRoot ? (0, skillResources_js_1.listSkillIds)(skillsRoot) : [];
+        const skillResources = skillIds.map((id) => {
+            const meta = (0, skillResources_js_1.getSkillListMetadata)(skillsRoot, id);
+            return {
+                uri: (0, skillResources_js_1.skillResourceUri)(id),
+                name: meta.name,
+                description: meta.description,
                 mimeType: "text/markdown",
-            },
-        ],
-    }));
-    server.setRequestHandler(types_js_1.ReadResourceRequestSchema, async (request) => {
-        const uri = request.params.uri;
-        if (uri !== RESOURCE_GUIDE_URI) {
-            throw new Error(`Unknown resource: ${uri}`);
-        }
+            };
+        });
         return {
-            contents: [
+            resources: [
                 {
                     uri: RESOURCE_GUIDE_URI,
+                    name: "Tool usage guide",
+                    description: "How to use lookup_doc and primitive tools; limits and best practices (Markdown).",
                     mimeType: "text/markdown",
-                    text: loadToolUsageGuide(),
                 },
+                ...skillResources,
             ],
         };
+    });
+    server.setRequestHandler(types_js_1.ReadResourceRequestSchema, async (request) => {
+        const uri = request.params.uri;
+        if (uri === RESOURCE_GUIDE_URI) {
+            return {
+                contents: [
+                    {
+                        uri: RESOURCE_GUIDE_URI,
+                        mimeType: "text/markdown",
+                        text: loadToolUsageGuide(),
+                    },
+                ],
+            };
+        }
+        const skillId = (0, skillResources_js_1.parseSkillResourceUri)(uri);
+        if (skillId) {
+            const skillsRoot = (0, skillResources_js_1.resolveSkillsRoot)();
+            if (!skillsRoot) {
+                throw new Error("No skills directory found (run npm run build or add .cursor/skills).");
+            }
+            const text = (0, skillResources_js_1.readSkillFile)(skillsRoot, skillId);
+            return {
+                contents: [
+                    {
+                        uri,
+                        mimeType: "text/markdown",
+                        text,
+                    },
+                ],
+            };
+        }
+        throw new Error(`Unknown resource: ${uri}`);
     });
     server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => ({
         tools: [
