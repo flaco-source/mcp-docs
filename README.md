@@ -333,13 +333,60 @@ npm run build
 docker compose up -d
 ```
 
+### Option E — Vercel (serverless)
+
+The repo includes `api/index.ts` and `vercel.json` so the HTTP MCP runs as a Vercel Node function. The build runs `npm run build` (TypeScript → `build/`, resources copied, then `scripts/ensure-public-dir.cjs` so a **`public/`** directory exists). `vercel.json` sets **`outputDirectory`: `public`** so Vercel does not fail with “No Output Directory named public”. If the dashboard overrides this, set **Output Directory** to `public` or leave it empty and rely on `vercel.json`.
+
+1. Install the CLI: `npm i -g vercel`
+2. From the project root: `vercel` (link the project) then `vercel --prod` for production.
+3. In the [Vercel dashboard](https://vercel.com) → your project → **Settings → Environment Variables**, add:
+
+| Name | Value | Environments |
+|------|--------|--------------|
+| `MCP_AUTH_TOKEN` | Your secret (same value you use in `Authorization: Bearer …`) | Production, Preview |
+| `ELECTRONICS_DOCS_DB_DIR` | `/tmp/electronics-docs-mcp` | Production, Preview |
+
+Redeploy after changing env vars.
+
+**URLs after deploy**
+
+- MCP (Streamable HTTP): `https://<your-project>.vercel.app/mcp` — rewrites in `vercel.json` map `/mcp` → `/api/mcp`.
+- Health: `https://<your-project>.vercel.app/health`
+- Direct function path (same behavior): `https://<your-project>.vercel.app/api/mcp`
+
+**Cursor `mcp.json`**
+
+```json
+{
+  "mcpServers": {
+    "electronics-docs-vercel": {
+      "type": "streamableHttp",
+      "url": "https://YOUR_PROJECT.vercel.app/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCP_AUTH_TOKEN"
+      }
+    }
+  }
+}
+```
+
+**Caveats**
+
+- **Serverless timeouts:** Default Hobby limit is **10s** per invocation; long PDF indexing may hit it. **Pro** allows longer functions (see `vercel.json` `maxDuration`). Prefer indexing heavy PDFs locally or on a long-running host.
+- **SQLite:** The index lives under `ELECTRONICS_DOCS_DB_DIR` (e.g. `/tmp`). On serverless, storage is **ephemeral** — the DB may reset when the function cold-starts or scales. For a durable index, use self-hosted Option D or a VM.
+- **`better-sqlite3`:** Native module; if the build fails on Vercel, check Node version in Project Settings and build logs.
+- **Secrets:** Never commit tokens to git. Set `MCP_AUTH_TOKEN` only in the Vercel UI or `vercel env add`.
+
 ---
 
 ## Project structure
 
 ```
+api/
+└── index.ts                    # Vercel serverless: Express app → /api/mcp, /api/health
 src/
 ├── index.ts                    # stdio entry point  (Cursor / Claude Desktop)
+├── httpApp.ts                  # Express app factory (shared: local HTTP + Vercel)
 ├── server-http.ts              # HTTP entry point   (LAN / remote / cloud)
 ├── mcpServerFactory.ts         # shared MCP server logic (tools + resources)
 ├── resources/
