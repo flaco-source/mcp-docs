@@ -10,6 +10,7 @@ import {
 import { VendorProvider } from "./providers/VendorProvider.js";
 import { TexasInstrumentsProvider } from "./providers/TexasInstrumentsProvider.js";
 import { StMicroelectronicsProvider } from "./providers/StMicroelectronicsProvider.js";
+import { AnalogDevicesProvider } from "./providers/AnalogDevicesProvider.js";
 import { listIndexedDocuments } from "./cache/DocumentCache.js";
 import {
     getSkillListMetadata,
@@ -21,17 +22,25 @@ import {
 } from "./skillResources.js";
 
 export const SERVER_NAME = "electronics-docs-mcp-server";
-export const SERVER_VERSION = "2.6.1";
+export const SERVER_VERSION = "2.7.0";
 const RESOURCE_GUIDE_URI = "electronics-docs://guide/tool-usage";
 
 // Providers are singletons — they hold the shared SQLite cache state
 const tiProvider = new TexasInstrumentsProvider();
 const stProvider = new StMicroelectronicsProvider();
+const adiProvider = new AnalogDevicesProvider();
 
 const vendors: Record<string, VendorProvider> = {
     [tiProvider.vendorId]: tiProvider,
     [stProvider.vendorId]: stProvider,
+    [adiProvider.vendorId]: adiProvider,
 };
+
+const SUPPORTED_VENDOR_IDS = Object.keys(vendors);
+
+function isKnownVendor(id: string): boolean {
+    return SUPPORTED_VENDOR_IDS.includes(id.toUpperCase());
+}
 
 function loadToolUsageGuide(): string {
     const candidates = [
@@ -55,7 +64,7 @@ function loadToolUsageGuide(): string {
  * Creates and returns a fully-configured MCP Server instance.
  *
  * Call this once for stdio mode, or once per request in HTTP stateless mode.
- * Providers (TI, ST) are module-level singletons and are shared across calls.
+ * Providers (TI, ST, ADI) are module-level singletons and are shared across calls.
  */
 export function createMcpServer(): Server {
     const server = new Server(
@@ -63,7 +72,7 @@ export function createMcpServer(): Server {
         {
             capabilities: { tools: {}, resources: {} },
             instructions:
-                "Electronics documentation MCP (TI, ST): see resource " +
+                "Electronics documentation MCP (TI, ST, ADI): see resource " +
                 RESOURCE_GUIDE_URI +
                 " and list_resources for electronics-docs://skill/<id> (project agent skills as Markdown). " +
                 "lookup_doc queries the local index only and returns suggestedDocuments when empty — it does NOT download PDFs; use read_doc to index. " +
@@ -146,11 +155,14 @@ export function createMcpServer(): Server {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        vendor: { type: "string", description: "Vendor ID (e.g., 'TI', 'ST')." },
+                        vendor: {
+                            type: "string",
+                            description: `Vendor ID: ${SUPPORTED_VENDOR_IDS.join(", ")}.`,
+                        },
                         part: {
                             type: "string",
                             description:
-                                "Part number (e.g., 'BQ40Z50', 'BQ40Z50-R2'). Revision suffixes are normalized.",
+                                "Part number (e.g., 'BQ40Z50', 'BQ40Z50-R2', 'ADAU1701'). Revision suffixes are normalized.",
                         },
                         question: {
                             type: "string",
@@ -174,11 +186,14 @@ export function createMcpServer(): Server {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        vendor: { type: "string", description: "Vendor ID (e.g., 'TI', 'ST')." },
+                        vendor: {
+                            type: "string",
+                            description: `Vendor ID: ${SUPPORTED_VENDOR_IDS.join(", ")}.`,
+                        },
                         query: {
                             type: "string",
                             description:
-                                "Part number or search term (e.g., 'LM317', 'BQ40Z50', 'BQ40Z50-R5').",
+                                "Part number or search term (e.g., 'LM317', 'BQ40Z50', 'BQ40Z50-R5', 'ADAU1701').",
                         },
                     },
                     required: ["vendor", "query"],
@@ -193,7 +208,10 @@ export function createMcpServer(): Server {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        vendor: { type: "string", description: "Vendor ID (e.g., 'TI', 'ST')." },
+                        vendor: {
+                            type: "string",
+                            description: `Vendor ID: ${SUPPORTED_VENDOR_IDS.join(", ")}.`,
+                        },
                         docIdOrUrl: { type: "string", description: "PDF URL to download and index." },
                         part: {
                             type: "string",
@@ -216,7 +234,10 @@ export function createMcpServer(): Server {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        vendor: { type: "string", description: "Vendor ID (e.g., 'TI', 'ST')." },
+                        vendor: {
+                            type: "string",
+                            description: `Vendor ID: ${SUPPORTED_VENDOR_IDS.join(", ")}.`,
+                        },
                         query: {
                             type: "string",
                             description:
@@ -258,7 +279,10 @@ export function createMcpServer(): Server {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        vendor: { type: "string", description: "Vendor ID (e.g., 'TI', 'ST')." },
+                        vendor: {
+                            type: "string",
+                            description: `Vendor ID: ${SUPPORTED_VENDOR_IDS.join(", ")}.`,
+                        },
                         docUrl: {
                             type: "string",
                             description:
@@ -293,7 +317,10 @@ export function createMcpServer(): Server {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        vendor: { type: "string", description: "Vendor ID: **TI** or **ST**." },
+                        vendor: {
+                            type: "string",
+                            description: `Vendor ID: ${SUPPORTED_VENDOR_IDS.join(", ")}.`,
+                        },
                         part: {
                             type: "string",
                             description:
@@ -319,10 +346,15 @@ export function createMcpServer(): Server {
                 return { isError: true, content: [{ type: "text", text: "Missing vendor." }] };
             }
             const v = vendorRaw.toUpperCase();
-            if (v !== "TI" && v !== "ST") {
+            if (!isKnownVendor(v)) {
                 return {
                     isError: true,
-                    content: [{ type: "text", text: "Vendor must be TI or ST." }],
+                    content: [
+                        {
+                            type: "text",
+                            text: `Vendor must be one of: ${SUPPORTED_VENDOR_IDS.join(", ")}.`,
+                        },
+                    ],
                 };
             }
             const partArg = args.part as string | undefined;
@@ -347,8 +379,9 @@ export function createMcpServer(): Server {
             };
         }
 
-        const vendorId = args.vendor as string;
-        const provider = vendors[vendorId];
+        const vendorId = String(args.vendor as string).trim();
+        const vendorKey = vendorId.toUpperCase();
+        const provider = vendors[vendorKey];
 
         if (!provider) {
             return {
@@ -356,7 +389,7 @@ export function createMcpServer(): Server {
                 content: [
                     {
                         type: "text",
-                        text: `Vendor '${vendorId}' is not supported. Supported vendors: ${Object.keys(vendors).join(", ")}`,
+                        text: `Vendor '${vendorId}' is not supported. Supported vendors: ${SUPPORTED_VENDOR_IDS.join(", ")}`,
                     },
                 ],
             };

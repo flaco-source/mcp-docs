@@ -121,6 +121,19 @@ function normalizeStPdfCanonical(url: string): string {
     }
 }
 
+/**
+ * Rows created by the old withDatasheetFallback used title "{PART} datasheet" and
+ * https://www.st.com/resource/en/datasheet/{slug}.pdf without verifying the part is ST.
+ * Skip them when merging DB rows so non-ST parts (e.g. other vendors' ICs) do not reappear.
+ */
+function isLegacySyntheticStDatasheetRow(docPart: string, title: string, url: string): boolean {
+    const partUpperDoc = docPart.trim().toUpperCase().replace(/\s+/g, '');
+    const slug = partUpperDoc.toLowerCase();
+    const legacyUrl = normalizeStPdfCanonical(`https://www.st.com/resource/en/datasheet/${slug}.pdf`);
+    if (normalizeStPdfCanonical(url) !== legacyUrl) return false;
+    return title.trim() === `${partUpperDoc} datasheet`;
+}
+
 function stResourceSegmentToType(segment: string): SearchResult['type'] {
     const s = segment.toLowerCase();
     if (s === 'datasheet' || s === 'data_brief') return 'datasheet';
@@ -323,6 +336,14 @@ export class StMicroelectronicsProvider extends VendorProvider {
             if (seenParts.has(p)) continue;
             seenParts.add(p);
             for (const doc of getDocumentsByPart(this.vendorId, p)) {
+                if (isLegacySyntheticStDatasheetRow(doc.part, doc.title, doc.url)) {
+                    if (isStSearchDebug()) {
+                        console.error(
+                            `DEBUG [ST]: skip legacy synthetic datasheet row part=${doc.part} url=${doc.url}`
+                        );
+                    }
+                    continue;
+                }
                 const url = normalizeStPdfCanonical(doc.url);
                 if (urlKeys.has(url)) continue;
                 urlKeys.add(url);
@@ -386,38 +407,13 @@ export class StMicroelectronicsProvider extends VendorProvider {
             extractPdfResultsFromStSearchApi(slug, partUpper, seen, results),
         ]);
 
-        const afterScrape = results.length;
-        const withFb = this.withDatasheetFallback(slug, partUpper, results);
         if (isStSearchDebug()) {
-            console.error(`DEBUG [ST]: scrape phase summary: before_fallback=${afterScrape} after=${withFb.length}`);
+            console.error(`DEBUG [ST]: scrape phase summary: pdfResults=${results.length}`);
         }
-        return withFb;
-    }
-
-    private withDatasheetFallback(
-        slug: string,
-        partUpper: string,
-        results: SearchResult[]
-    ): SearchResult[] {
-        const hasDatasheet = results.some((r) => r.type === 'datasheet');
-        if (hasDatasheet) return results;
-
-        const fallbackUrl = normalizeStPdfCanonical(
-            `https://www.st.com/resource/en/datasheet/${slug}.pdf`
-        );
-        if (isStSearchDebug()) {
-            console.error(`DEBUG [ST][datasheet_fallback] + ${fallbackUrl}`);
-        }
-        return [
-            ...results,
-            {
-                title: `${partUpper} datasheet`,
-                description: `${ST_DOC_TYPE_LABELS.datasheet} for ${partUpper} (canonical URL)`,
-                url: fallbackUrl,
-                type: 'datasheet' as const,
-                cached: false,
-            },
-        ];
+        // No blind "canonical datasheet" URL: that pattern guessed
+        // `.../resource/en/datasheet/<slug>.pdf` for any slug, including non-ST parts
+        // (e.g. other vendors' ICs), which breaks vendor isolation and misleads agents.
+        return results;
     }
 
     async readDoc(docIdOrUrl: string, meta?: ReadDocMeta): Promise<string> {

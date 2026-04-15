@@ -1,6 +1,6 @@
 # Electronics Docs MCP Server
 
-An MCP (Model Context Protocol) server that gives LLMs direct access to **official vendor PDF documentation** (**Texas Instruments** and **STMicroelectronics**), with a **local SQLite full-text index** (FTS5 + BM25) so answers can be grounded in real datasheet and TRM text.
+An MCP (Model Context Protocol) server that gives LLMs direct access to **official vendor PDF documentation** (**Texas Instruments**, **STMicroelectronics**, and **Analog Devices**), with a **local SQLite full-text index** (FTS5 + BM25) so answers can be grounded in real datasheet and TRM text.
 
 ## Tools
 
@@ -28,7 +28,7 @@ The server advertises `**instructions**` on initialize pointing agents to this r
 
 ## Cursor skill (optional)
 
-Project skills: [`electronics-docs-mcp`](.cursor/skills/electronics-docs-mcp/SKILL.md), [`electronics-docs-mcp-ti`](.cursor/skills/electronics-docs-mcp-ti/SKILL.md), [`electronics-docs-mcp-st`](.cursor/skills/electronics-docs-mcp-st/SKILL.md). Copy to `~/.cursor/skills/` if you want them globally.
+Project skills: [`electronics-docs-mcp`](.cursor/skills/electronics-docs-mcp/SKILL.md), [`electronics-docs-mcp-ti`](.cursor/skills/electronics-docs-mcp-ti/SKILL.md), [`electronics-docs-mcp-st`](.cursor/skills/electronics-docs-mcp-st/SKILL.md), [`electronics-docs-mcp-adi`](.cursor/skills/electronics-docs-mcp-adi/SKILL.md). Copy to `~/.cursor/skills/` if you want them globally.
 
 ## Supported vendors
 
@@ -37,14 +37,21 @@ Project skills: [`electronics-docs-mcp`](.cursor/skills/electronics-docs-mcp/SKI
 | --------- | ------------------ | --------- |
 | `TI`      | Texas Instruments  | Supported |
 | `ST`      | STMicroelectronics | Supported |
+| `ADI`     | Analog Devices     | Supported |
 
+### Recent changes (server **v2.7.x**)
+
+- **Analog Devices (`ADI`):** New `AnalogDevicesProvider` — PDF discovery from `analog.com/en/products/<slug>.html`, slug fallbacks on 404, `lookup_doc` filters PCN and `mds.analog.com` from suggestions only; same MCP tools as TI/ST.
+- **Vendor list:** Supported vendors are derived from the `vendors` map in `mcpServerFactory.ts` (including `list_indexed_documents` validation). Tool schemas list all supported IDs.
+- **STMicroelectronics (`ST`):** Removed the blind “canonical datasheet” URL fallback that could suggest `st.com/.../datasheet/<slug>.pdf` for non‑ST parts. Legacy DB rows matching that synthetic pattern are skipped when merging `search_docs` results.
+- **PDF download (`read_doc`):** Retries on transient errors (502/503/504, timeouts, etc.); longer default timeout for `analog.com`; `Accept-Language` on Analog PDF requests; `Referer` for native fetch chosen by host (`analog.com`, `ti.com`, `st.com`).
 
 ## Adding a new vendor (hot plug)
 
 1. Create `src/providers/YourVendorProvider.ts` extending `VendorProvider`.
 2. Implement `searchDocs`, `readDoc`, `queryContent`, and optionally override `**lookupDoc**` and `**getDocumentPageText**` for orchestrated behavior and page reads.
-3. Register the provider in `[src/mcpServerFactory.ts](src/mcpServerFactory.ts)` under `vendors`.
-4. Rebuild: `npm run build`
+3. Register the provider in `[src/mcpServerFactory.ts](src/mcpServerFactory.ts)` under `vendors` (supported vendor IDs and tool descriptions follow this map automatically).
+4. Rebuild: `npm run build` and restart the MCP process.
 
 ## Development
 
@@ -157,7 +164,7 @@ Default: `http://0.0.0.0:3000/mcp`
 
 ```bash
 curl http://localhost:3000/health
-# {"status":"ok","server":"electronics-docs-mcp","version":"2.5.0"}
+# {"status":"ok","server":"electronics-docs-mcp","version":"2.7.0"}
 ```
 
 ### Test a tool call (curl)

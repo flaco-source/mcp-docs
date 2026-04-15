@@ -1,11 +1,12 @@
 /**
- * Agent-flow smoke tests: --tool <mode> --vendor TI|ST
+ * Agent-flow smoke tests: --tool <mode> --vendor TI|ST|ADI
  * Set RUN_E2E_NETWORK to true to run read/query/page network-heavy steps in `read`, `query`, `page`, `flow`, and `all`.
  */
 import path from "path";
 import fs from "fs";
 import { TexasInstrumentsProvider } from "../../src/providers/TexasInstrumentsProvider.ts";
 import { StMicroelectronicsProvider } from "../../src/providers/StMicroelectronicsProvider.ts";
+import { AnalogDevicesProvider } from "../../src/providers/AnalogDevicesProvider.ts";
 import type { VendorProvider } from "../../src/providers/VendorProvider.ts";
 import type { ReadDocMeta } from "../../src/providers/VendorProvider.ts";
 import { fixtures, type VendorKey } from "./fixtures.ts";
@@ -35,14 +36,14 @@ function parseArgs(): { tool: string; vendor: VendorKey } {
         }
         if (a[i] === "--vendor" && a[i + 1]) {
             const v = a[++i]!.toUpperCase();
-            if (v === "TI" || v === "ST") vendor = v;
+            if (v === "TI" || v === "ST" || v === "ADI") vendor = v;
             continue;
         }
     }
     // Fallback when npm strips leading --flags: `tsx run.ts lookup ST`
     if (!tool && a.length >= 1 && TOOL_NAMES.has(a[0]!)) {
         tool = a[0]!;
-        if (a.length >= 2 && (a[1] === "TI" || a[1] === "ST")) {
+        if (a.length >= 2 && (a[1] === "TI" || a[1] === "ST" || a[1] === "ADI")) {
             vendor = a[1]!;
         }
     }
@@ -50,7 +51,9 @@ function parseArgs(): { tool: string; vendor: VendorKey } {
 }
 
 function makeProvider(vendor: VendorKey): VendorProvider {
-    return vendor === "TI" ? new TexasInstrumentsProvider() : new StMicroelectronicsProvider();
+    if (vendor === "TI") return new TexasInstrumentsProvider();
+    if (vendor === "ST") return new StMicroelectronicsProvider();
+    return new AnalogDevicesProvider();
 }
 
 function withReadSpy(provider: VendorProvider): { getReadCount: () => number } {
@@ -176,7 +179,7 @@ async function runFlow(vendor: VendorKey): Promise<void> {
     console.log("flow: after read, query hits=", hits.length);
 }
 
-const ALL_VENDORS: VendorKey[] = ["TI", "ST"];
+const ALL_VENDORS: VendorKey[] = ["TI", "ST", "ADI"];
 
 async function runAll(): Promise<void> {
     await runResource();
@@ -200,7 +203,7 @@ async function main(): Promise<void> {
     const { tool, vendor } = parseArgs();
     if (!tool) {
         console.error(
-            "Usage: tsx scripts/agent-flow/run.ts --tool <resource|search|lookup|read|query|page|flow|all> [--vendor TI|ST]"
+            "Usage: tsx scripts/agent-flow/run.ts --tool <resource|search|lookup|read|query|page|flow|all> [--vendor TI|ST|ADI]"
         );
         process.exit(2);
     }

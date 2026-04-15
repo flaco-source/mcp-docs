@@ -15,7 +15,7 @@ Use **`vendor`: `"ST"`** on every tool call.
 ## Flow
 
 1. **`lookup_doc`** — local index first; if no chunks, **`suggestedDocuments`** (product + series + search API, with flyers/tape-and-reel filtered from suggestions).
-2. **`read_doc`** — canonical `https://www.st.com/resource/en/.../*.pdf` URLs.
+2. **`read_doc`** — use PDF URLs from **`search_docs`** / **`lookup_doc`** (`https://www.st.com/resource/en/.../*.pdf`). ST does not invent datasheet URLs for unknown slugs.
 3. **`query_doc_content`** then **`read_doc_page`** as needed.
 
 ## When to prefer `search_docs`
