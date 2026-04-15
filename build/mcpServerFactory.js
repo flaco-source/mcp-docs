@@ -49,10 +49,10 @@ function createMcpServer() {
             "Tools: lookup_doc, search_docs, read_doc, query_doc_content, read_doc_page, list_indexed_documents.",
     });
     server.setRequestHandler(types_js_1.ListResourcesRequestSchema, async () => {
-        const skillsRoot = (0, skillResources_js_1.resolveSkillsRoot)();
-        const skillIds = skillsRoot ? (0, skillResources_js_1.listSkillIds)(skillsRoot) : [];
+        const sources = (0, skillResources_js_1.resolveSkillSources)();
+        const skillIds = sources ? (0, skillResources_js_1.listResolvedSkillIds)(sources) : [];
         const skillResources = skillIds.map((id) => {
-            const meta = (0, skillResources_js_1.getSkillListMetadata)(skillsRoot, id);
+            const meta = (0, skillResources_js_1.getSkillListMetadata)(sources, id);
             return {
                 uri: (0, skillResources_js_1.skillResourceUri)(id),
                 name: meta.name,
@@ -87,11 +87,11 @@ function createMcpServer() {
         }
         const skillId = (0, skillResources_js_1.parseSkillResourceUri)(uri);
         if (skillId) {
-            const skillsRoot = (0, skillResources_js_1.resolveSkillsRoot)();
-            if (!skillsRoot) {
+            const sources = (0, skillResources_js_1.resolveSkillSources)();
+            if (!sources) {
                 throw new Error("No skills directory found (run npm run build or add .cursor/skills).");
             }
-            const text = (0, skillResources_js_1.readSkillFile)(skillsRoot, skillId);
+            const text = (0, skillResources_js_1.readResolvedSkill)(sources, skillId);
             return {
                 contents: [
                     {

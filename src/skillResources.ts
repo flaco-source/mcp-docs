@@ -9,6 +9,14 @@ const SKILL_ID_RE = /^[a-zA-Z0-9_-]+$/;
 /** Optional: absolute path to a directory of `<id>/SKILL.md` skill folders (overrides discovery). */
 const ENV_SKILLS_ROOT = "ELECTRONICS_DOCS_MCP_SKILLS_ROOT";
 
+/**
+ * Resolved skill locations. Matches copy-skills.cjs: merged `build/` output, else overlay
+ * `.cursor/skills` over `src/resources/skills` (cursor wins per id).
+ */
+export type SkillSources =
+    | { mode: "merged"; root: string }
+    | { mode: "overlay"; srcRoot: string | null; cursorRoot: string | null };
+
 function findPackageRoot(startDir: string): string | null {
     let dir = path.resolve(startDir);
     for (let i = 0; i < 12; i++) {
@@ -43,44 +51,60 @@ function hasSkillMarkdownUnder(rootDir: string): boolean {
 }
 
 /**
- * Resolves the skills directory:
- * 1. ELECTRONICS_DOCS_MCP_SKILLS_ROOT (if set and valid)
- * 2. build/resources/skills next to the running script (production)
- * 3. Same path via package root (handles odd cwd / inspector layouts)
- * 4. src/resources/skills at package root (version-controlled source — works even without build/skills)
- * 5. .cursor/skills at package root (local Cursor copy)
- * 6. Legacy: ../.cursor/skills and ../src/resources/skills from __dirname
+ * Resolves where skill Markdown lives:
+ * 1. `ELECTRONICS_DOCS_MCP_SKILLS_ROOT` (if set and valid) — single tree
+ * 2. **Merged** `build/resources/skills` only when the entrypoint runs from `build/` (production / `node build/...`)
+ * 3. Otherwise **overlay** mode: union of ids from `src/resources/skills` and `.cursor/skills`; per-id read prefers `.cursor` (same order as copy-skills overlay)
+ *
+ * Skips (2) when running from `src/` (e.g. tsx) so a stale `build/` does not hide `.cursor` edits before rebuild.
  */
-export function resolveSkillsRoot(): string | null {
+export function resolveSkillSources(): SkillSources | null {
     const envPath = process.env[ENV_SKILLS_ROOT]?.trim();
     if (envPath) {
         const abs = path.resolve(envPath);
-        if (hasSkillMarkdownUnder(abs)) return abs;
+        if (hasSkillMarkdownUnder(abs)) return { mode: "merged", root: abs };
     }
 
     const fromDir = __dirname;
-    const candidates: string[] = [];
+    const runningFromBuildTree = path.basename(fromDir) === "build";
 
-    candidates.push(path.join(fromDir, "resources", "skills"));
+    if (runningFromBuildTree) {
+        const adjacent = path.join(fromDir, "resources", "skills");
+        if (hasSkillMarkdownUnder(adjacent)) {
+            return { mode: "merged", root: path.resolve(adjacent) };
+        }
+        const root = findPackageRoot(fromDir);
+        if (root) {
+            const merged = path.join(root, "build", "resources", "skills");
+            if (hasSkillMarkdownUnder(merged)) {
+                return { mode: "merged", root: path.resolve(merged) };
+            }
+        }
+    }
 
     const root = findPackageRoot(fromDir);
+    let srcRoot: string | null = null;
+    let cursorRoot: string | null = null;
+
     if (root) {
-        candidates.push(path.join(root, "build", "resources", "skills"));
-        candidates.push(path.join(root, "src", "resources", "skills"));
-        candidates.push(path.join(root, ".cursor", "skills"));
+        const s = path.join(root, "src", "resources", "skills");
+        if (hasSkillMarkdownUnder(s)) srcRoot = path.resolve(s);
+        const c = path.join(root, ".cursor", "skills");
+        if (hasSkillMarkdownUnder(c)) cursorRoot = path.resolve(c);
     }
 
-    candidates.push(path.join(fromDir, "..", ".cursor", "skills"));
-    candidates.push(path.join(fromDir, "..", "src", "resources", "skills"));
+    const legacyCursor = path.resolve(path.join(fromDir, "..", ".cursor", "skills"));
+    const legacySrc = path.resolve(path.join(fromDir, "..", "src", "resources", "skills"));
+    if (!cursorRoot && hasSkillMarkdownUnder(legacyCursor)) cursorRoot = legacyCursor;
+    if (!srcRoot && hasSkillMarkdownUnder(legacySrc)) srcRoot = legacySrc;
 
-    const seen = new Set<string>();
-    for (const c of candidates) {
-        const norm = path.resolve(c);
-        if (seen.has(norm)) continue;
-        seen.add(norm);
-        if (hasSkillMarkdownUnder(norm)) return norm;
+    if (!srcRoot && path.basename(fromDir) !== "build") {
+        const adjacentSrc = path.resolve(path.join(fromDir, "resources", "skills"));
+        if (hasSkillMarkdownUnder(adjacentSrc)) srcRoot = adjacentSrc;
     }
-    return null;
+
+    if (!srcRoot && !cursorRoot) return null;
+    return { mode: "overlay", srcRoot, cursorRoot };
 }
 
 export function listSkillIds(skillsRoot: string): string[] {
@@ -91,6 +115,40 @@ export function listSkillIds(skillsRoot: string): string[] {
         if (fs.existsSync(path.join(skillsRoot, ent.name, "SKILL.md"))) ids.push(ent.name);
     }
     return ids.sort();
+}
+
+/** Ids to expose: merged folder, or union of overlay trees (copy-skills semantics). */
+export function listResolvedSkillIds(sources: SkillSources): string[] {
+    if (sources.mode === "merged") {
+        return listSkillIds(sources.root);
+    }
+    const ids = new Set<string>();
+    if (sources.srcRoot) {
+        for (const id of listSkillIds(sources.srcRoot)) ids.add(id);
+    }
+    if (sources.cursorRoot) {
+        for (const id of listSkillIds(sources.cursorRoot)) ids.add(id);
+    }
+    return [...ids].sort();
+}
+
+function skillMarkdownPath(root: string, skillId: string): string {
+    return path.join(root, skillId, "SKILL.md");
+}
+
+export function readResolvedSkill(sources: SkillSources, skillId: string): string {
+    if (!SKILL_ID_RE.test(skillId)) {
+        throw new Error("Invalid skill id");
+    }
+    if (sources.mode === "merged") {
+        return fs.readFileSync(skillMarkdownPath(sources.root, skillId), "utf-8");
+    }
+    for (const root of [sources.cursorRoot, sources.srcRoot]) {
+        if (!root) continue;
+        const p = skillMarkdownPath(root, skillId);
+        if (fs.existsSync(p)) return fs.readFileSync(p, "utf-8");
+    }
+    throw new Error(`Skill not found: ${skillId}`);
 }
 
 function parseFrontmatter(raw: string): { name?: string; description?: string } {
@@ -118,19 +176,11 @@ function parseFrontmatter(raw: string): { name?: string; description?: string } 
     };
 }
 
-export function readSkillFile(skillsRoot: string, skillId: string): string {
-    if (!SKILL_ID_RE.test(skillId)) {
-        throw new Error("Invalid skill id");
-    }
-    const filePath = path.join(skillsRoot, skillId, "SKILL.md");
-    return fs.readFileSync(filePath, "utf-8");
-}
-
 export function getSkillListMetadata(
-    skillsRoot: string,
+    sources: SkillSources,
     skillId: string
 ): { name: string; description: string } {
-    const text = readSkillFile(skillsRoot, skillId);
+    const text = readResolvedSkill(sources, skillId);
     const meta = parseFrontmatter(text);
     return {
         name: meta.name ?? skillId,

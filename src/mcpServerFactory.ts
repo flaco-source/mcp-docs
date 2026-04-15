@@ -13,10 +13,10 @@ import { StMicroelectronicsProvider } from "./providers/StMicroelectronicsProvid
 import { listIndexedDocuments } from "./cache/DocumentCache.js";
 import {
     getSkillListMetadata,
-    listSkillIds,
+    listResolvedSkillIds,
     parseSkillResourceUri,
-    readSkillFile,
-    resolveSkillsRoot,
+    readResolvedSkill,
+    resolveSkillSources,
     skillResourceUri,
 } from "./skillResources.js";
 
@@ -64,10 +64,10 @@ export function createMcpServer(): Server {
     );
 
     server.setRequestHandler(ListResourcesRequestSchema, async () => {
-        const skillsRoot = resolveSkillsRoot();
-        const skillIds = skillsRoot ? listSkillIds(skillsRoot) : [];
+        const sources = resolveSkillSources();
+        const skillIds = sources ? listResolvedSkillIds(sources) : [];
         const skillResources = skillIds.map((id) => {
-            const meta = getSkillListMetadata(skillsRoot!, id);
+            const meta = getSkillListMetadata(sources!, id);
             return {
                 uri: skillResourceUri(id),
                 name: meta.name,
@@ -104,11 +104,11 @@ export function createMcpServer(): Server {
         }
         const skillId = parseSkillResourceUri(uri);
         if (skillId) {
-            const skillsRoot = resolveSkillsRoot();
-            if (!skillsRoot) {
+            const sources = resolveSkillSources();
+            if (!sources) {
                 throw new Error("No skills directory found (run npm run build or add .cursor/skills).");
             }
-            const text = readSkillFile(skillsRoot, skillId);
+            const text = readResolvedSkill(sources, skillId);
             return {
                 contents: [
                     {
