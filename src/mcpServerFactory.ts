@@ -22,7 +22,7 @@ import {
 } from "./skillResources.js";
 
 export const SERVER_NAME = "electronics-docs-mcp-server";
-export const SERVER_VERSION = "2.6.1";
+export const SERVER_VERSION = "2.7.0";
 const RESOURCE_GUIDE_URI = "electronics-docs://guide/tool-usage";
 
 // Providers are singletons — they hold the shared SQLite cache state
