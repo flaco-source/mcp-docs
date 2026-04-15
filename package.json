@@ -8,7 +8,7 @@
     "start": "tsx src/index.ts",
     "start:http": "tsx src/server-http.ts",
     "test:agent": "tsx scripts/agent-flow/run.ts",
-    "build": "tsc && node -e \"const fs=require('fs'),p=require('path');const d=p.join('build','resources');fs.mkdirSync(d,{recursive:true});fs.copyFileSync(p.join('src','resources','tool-usage-guide.md'),p.join(d,'tool-usage-guide.md'));\" && node scripts/ensure-public-dir.cjs",
+    "build": "tsc && node -e \"const fs=require('fs'),p=require('path');const d=p.join('build','resources');fs.mkdirSync(d,{recursive:true});fs.copyFileSync(p.join('src','resources','tool-usage-guide.md'),p.join(d,'tool-usage-guide.md'));\" && node scripts/ensure-public-dir.cjs && node scripts/copy-skills.cjs",
     "start:http:prod": "node build/server-http.js"
   },
   "keywords": [],
