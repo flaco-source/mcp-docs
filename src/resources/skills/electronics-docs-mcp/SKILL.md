@@ -48,4 +48,4 @@ Lexical search only; PDF layout may be imperfect; no image/schematic understandi
 
 ## Version
 
-Aligned with MCP server **v2.5+** (**`list_indexed_documents`**; tool names: **`lookup_doc`**, **`search_docs`**, **`read_doc`**, **`read_doc_page`**; ST **`getDocumentPageText`**).
+Aligned with MCP server **v2.7+** (vendors **TI**, **ST**, **ADI**; **`list_indexed_documents`**; tool names: **`lookup_doc`**, **`search_docs`**, **`read_doc`**, **`query_doc_content`**, **`read_doc_page`**).

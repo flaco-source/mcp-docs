@@ -39,13 +39,19 @@ Project skills: [`electronics-docs-mcp`](.cursor/skills/electronics-docs-mcp/SKI
 | `ST`      | STMicroelectronics | Supported |
 | `ADI`     | Analog Devices     | Supported |
 
+### Recent changes (server **v2.7.x**)
+
+- **Analog Devices (`ADI`):** New `AnalogDevicesProvider` — PDF discovery from `analog.com/en/products/<slug>.html`, slug fallbacks on 404, `lookup_doc` filters PCN and `mds.analog.com` from suggestions only; same MCP tools as TI/ST.
+- **Vendor list:** Supported vendors are derived from the `vendors` map in `mcpServerFactory.ts` (including `list_indexed_documents` validation). Tool schemas list all supported IDs.
+- **STMicroelectronics (`ST`):** Removed the blind “canonical datasheet” URL fallback that could suggest `st.com/.../datasheet/<slug>.pdf` for non‑ST parts. Legacy DB rows matching that synthetic pattern are skipped when merging `search_docs` results.
+- **PDF download (`read_doc`):** Retries on transient errors (502/503/504, timeouts, etc.); longer default timeout for `analog.com`; `Accept-Language` on Analog PDF requests; `Referer` for native fetch chosen by host (`analog.com`, `ti.com`, `st.com`).
 
 ## Adding a new vendor (hot plug)
 
 1. Create `src/providers/YourVendorProvider.ts` extending `VendorProvider`.
 2. Implement `searchDocs`, `readDoc`, `queryContent`, and optionally override `**lookupDoc**` and `**getDocumentPageText**` for orchestrated behavior and page reads.
-3. Register the provider in `[src/mcpServerFactory.ts](src/mcpServerFactory.ts)` under `vendors`.
-4. Rebuild: `npm run build`
+3. Register the provider in `[src/mcpServerFactory.ts](src/mcpServerFactory.ts)` under `vendors` (supported vendor IDs and tool descriptions follow this map automatically).
+4. Rebuild: `npm run build` and restart the MCP process.
 
 ## Development
 
@@ -158,7 +164,7 @@ Default: `http://0.0.0.0:3000/mcp`
 
 ```bash
 curl http://localhost:3000/health
-# {"status":"ok","server":"electronics-docs-mcp","version":"2.5.0"}
+# {"status":"ok","server":"electronics-docs-mcp","version":"2.7.0"}
 ```
 
 ### Test a tool call (curl)
