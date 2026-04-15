@@ -1,7 +1,7 @@
 ---
 name: electronics-docs-mcp
 description: >-
-  Electronics Docs MCP (TI, ST): list_indexed_documents for indexed PDF counts; lookup_doc
+  Electronics Docs MCP (TI, ST, ADI): list_indexed_documents for indexed PDF counts; lookup_doc
   queries FTS only; read_doc to index; query_doc_content and read_doc_page after
   indexing. Read resource electronics-docs://guide/tool-usage.
 ---
@@ -10,7 +10,7 @@ description: >-
 
 ## When this applies
 
-Whenever the workspace uses the **electronics-docs** MCP (TI/ST PDFs, local FTS index).
+Whenever the workspace uses the **electronics-docs** MCP (TI, ST, or ADI PDFs, local FTS index).
 
 ## Which tool to call first
 
@@ -27,10 +27,11 @@ Whenever the workspace uses the **electronics-docs** MCP (TI/ST PDFs, local FTS 
 - **`lookup_doc`** does **not** download or index PDFs. It either returns **`chunks`** from the existing index or **`suggestedDocuments`** (prioritized links).
 - **`read_doc`** indexes a PDF. **`maxDocsToIndex`** on lookup is legacy and ignored.
 
-### TI vs ST
+### TI vs ST vs ADI
 
 - **TI:** Symlink datasheet URLs may not appear in **`suggestedDocuments`**; if the user has that URL, **`read_doc`** first.
 - **ST:** **`search_docs`** can return more links than lookup suggestions (lookup filters flyers / tape-and-reel noise from suggestions only).
+- **ADI:** Product-page PDF list; lookup omits PCN / **`mds.analog.com`** from suggestions only — **`search_docs`** keeps the full list.
 
 ## Follow-up sequence
 

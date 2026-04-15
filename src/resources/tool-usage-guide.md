@@ -4,7 +4,7 @@
 
 This MCP server exposes **official vendor PDF documentation** (datasheets, Technical Reference Manuals, application notes) with **local full-text search** (SQLite FTS5 + BM25). It reduces hallucinations by grounding answers in indexed source text.
 
-Supports **Texas Instruments (TI)** and **STMicroelectronics (ST)**.
+Supports **Texas Instruments (TI)**, **STMicroelectronics (ST)**, and **Analog Devices (ADI)**.
 
 ## Four-phase workflow
 
@@ -30,12 +30,13 @@ Use when the user has a **part number** and a **natural-language question**.
 
 - **TI:** Suggestions come from the **product page** (`ti.com/product/<PART>`) `/lit/...` links. **Direct datasheet URLs** such as `https://www.ti.com/lit/ds/symlink/<part>.pdf` may **not** appear in suggestions; if you already have that URL, use **`read_doc`** directly.
 - **ST:** Suggestions merge **product page**, **series documentation**, and **ST search API** results. Lookup filters out obvious noise (e.g. flyers, product presentations, tape-and-reel titles) from **`suggestedDocuments` only** — **`search_docs`** still returns the full merged list.
+- **ADI:** Suggestions come from the **product page** `https://www.analog.com/en/products/<slug>.html` (PDF links in the HTML). If the URL returns **404** for a variant part (e.g. `LTC6946-1`), the server tries slug fallbacks (e.g. strip trailing `-1`). **`search.html`** is not used in v1 (static HTML has no product/PDF links). Lookup filters **PCN** PDFs and **`mds.analog.com`** package drawings from **`suggestedDocuments` only** — **`search_docs`** still returns the full list.
 
 The **`maxDocsToIndex`** parameter is **legacy** and **ignored** (lookup does not index).
 
 ## `read_doc` (URL-based)
 
-Use when you have the **exact PDF URL** (including TI `/lit/ds/symlink/....pdf` or ST `/resource/en/.../....pdf`).
+Use when you have the **exact PDF URL** (including TI `/lit/ds/symlink/....pdf`, ST `/resource/en/.../....pdf`, or ADI `analog.com/media/.../....pdf`).
 
 - **Always pass `part`** when known so `query_doc_content` filters work.
 - After indexing, run **`query_doc_content`**, or **`read_doc_page`** if you already know the page.
@@ -53,7 +54,7 @@ BM25 search over indexed chunks. **Each result includes `docUrl`**. Requires doc
 
 ## `list_indexed_documents`
 
-Lists **indexed** PDF rows from the local database (**`vendor`** required: `TI` or `ST`; optional **`part`**). Returns **`count`** and **`documents`** (metadata: id, part, title, docType, url, indexedAt). Does not query the web. Use this instead of raw SQL when you need how many PDFs are indexed for a part.
+Lists **indexed** PDF rows from the local database (**`vendor`** required: `TI`, `ST`, or `ADI`; optional **`part`**). Returns **`count`** and **`documents`** (metadata: id, part, title, docType, url, indexedAt). Does not query the web. Use this instead of raw SQL when you need how many PDFs are indexed for a part.
 
 ## `search_docs`
 

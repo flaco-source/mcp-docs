@@ -55,13 +55,25 @@ async function fetchUrlWithAxios(u: string, timeoutMs: number): Promise<{ buf: B
     }
 }
 
+function refererForPdfUrl(u: string): string {
+    try {
+        const h = new URL(u).hostname.toLowerCase();
+        if (h.endsWith('analog.com')) return 'https://www.analog.com/';
+        if (h.endsWith('ti.com')) return 'https://www.ti.com/';
+        if (h.endsWith('st.com')) return 'https://www.st.com/';
+    } catch {
+        /* ignore */
+    }
+    return 'https://www.st.com/';
+}
+
 async function fetchUrlWithNativeFetch(u: string, timeoutMs: number): Promise<{ buf: Buffer | null; message: string }> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
         const res = await fetch(u, {
             signal: ctrl.signal,
-            headers: { ...HEADERS_PDF, Referer: 'https://www.st.com/' },
+            headers: { ...HEADERS_PDF, Referer: refererForPdfUrl(u) },
             redirect: 'follow',
         });
         clearTimeout(timer);

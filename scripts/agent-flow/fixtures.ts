@@ -1,4 +1,4 @@
-export type VendorKey = "TI" | "ST";
+export type VendorKey = "TI" | "ST" | "ADI";
 
 export const fixtures: Record<
     VendorKey,
@@ -13,5 +13,11 @@ export const fixtures: Record<
         defaultPart: "STM32G071RB",
         defaultQuestion: "GPIO alternate function",
         sampleReadUrl: "https://www.st.com/resource/en/datasheet/stm32g431rb.pdf",
+    },
+    ADI: {
+        defaultPart: "ADAU1701",
+        defaultQuestion: "PLL",
+        sampleReadUrl:
+            "https://www.analog.com/media/en/technical-documentation/data-sheets/ADAU1701.pdf",
     },
 };

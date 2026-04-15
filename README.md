@@ -1,6 +1,6 @@
 # Electronics Docs MCP Server
 
-An MCP (Model Context Protocol) server that gives LLMs direct access to **official vendor PDF documentation** (**Texas Instruments** and **STMicroelectronics**), with a **local SQLite full-text index** (FTS5 + BM25) so answers can be grounded in real datasheet and TRM text.
+An MCP (Model Context Protocol) server that gives LLMs direct access to **official vendor PDF documentation** (**Texas Instruments**, **STMicroelectronics**, and **Analog Devices**), with a **local SQLite full-text index** (FTS5 + BM25) so answers can be grounded in real datasheet and TRM text.
 
 ## Tools
 
@@ -28,7 +28,7 @@ The server advertises `**instructions**` on initialize pointing agents to this r
 
 ## Cursor skill (optional)
 
-Project skills: [`electronics-docs-mcp`](.cursor/skills/electronics-docs-mcp/SKILL.md), [`electronics-docs-mcp-ti`](.cursor/skills/electronics-docs-mcp-ti/SKILL.md), [`electronics-docs-mcp-st`](.cursor/skills/electronics-docs-mcp-st/SKILL.md). Copy to `~/.cursor/skills/` if you want them globally.
+Project skills: [`electronics-docs-mcp`](.cursor/skills/electronics-docs-mcp/SKILL.md), [`electronics-docs-mcp-ti`](.cursor/skills/electronics-docs-mcp-ti/SKILL.md), [`electronics-docs-mcp-st`](.cursor/skills/electronics-docs-mcp-st/SKILL.md), [`electronics-docs-mcp-adi`](.cursor/skills/electronics-docs-mcp-adi/SKILL.md). Copy to `~/.cursor/skills/` if you want them globally.
 
 ## Supported vendors
 
@@ -37,6 +37,7 @@ Project skills: [`electronics-docs-mcp`](.cursor/skills/electronics-docs-mcp/SKI
 | --------- | ------------------ | --------- |
 | `TI`      | Texas Instruments  | Supported |
 | `ST`      | STMicroelectronics | Supported |
+| `ADI`     | Analog Devices     | Supported |
 
 
 ## Adding a new vendor (hot plug)
