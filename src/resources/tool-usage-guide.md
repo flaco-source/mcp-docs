@@ -29,7 +29,7 @@ Use when the user has a **part number** and a **natural-language question**.
 ### Vendor notes
 
 - **TI:** Suggestions come from the **product page** (`ti.com/product/<PART>`) `/lit/...` links. **Direct datasheet URLs** such as `https://www.ti.com/lit/ds/symlink/<part>.pdf` may **not** appear in suggestions; if you already have that URL, use **`read_doc`** directly.
-- **ST:** Suggestions merge **product page**, **series documentation**, and **ST search API** results. Lookup filters out obvious noise (e.g. flyers, product presentations, tape-and-reel titles) from **`suggestedDocuments` only** — **`search_docs`** still returns the full merged list.
+- **ST:** Suggestions merge **product page**, **series documentation**, and **ST search API** results only — **no guessed datasheet URLs** (every `st.com` PDF link must appear in those sources). Lookup filters obvious noise from **`suggestedDocuments` only** — **`search_docs`** still returns the full merged list.
 - **ADI:** Suggestions come from the **product page** `https://www.analog.com/en/products/<slug>.html` (PDF links in the HTML). If the URL returns **404** for a variant part (e.g. `LTC6946-1`), the server tries slug fallbacks (e.g. strip trailing `-1`). **`search.html`** is not used in v1 (static HTML has no product/PDF links). Lookup filters **PCN** PDFs and **`mds.analog.com`** package drawings from **`suggestedDocuments` only** — **`search_docs`** still returns the full list.
 
 The **`maxDocsToIndex`** parameter is **legacy** and **ignored** (lookup does not index).
